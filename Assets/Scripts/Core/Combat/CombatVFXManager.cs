@@ -645,7 +645,7 @@ namespace AbsoluteZero.Core.Combat
                 var sr = feedSpriteGO.AddComponent<SpriteRenderer>();
                 sr.sprite = sprite;
                 sr.sortingOrder = 90;
-                feedSpriteGO.transform.position = GetPlayerWorldPos(targetIdx) + new Vector3(0f, 0.5f, 0f);
+                feedSpriteGO.transform.position = GetPlayerWorldPos(targetIdx) + new Vector3(-0.05f, 0.5f, 0f);
                 feedSpriteGO.transform.localScale = Vector3.one * 0.8f;
             }
 
