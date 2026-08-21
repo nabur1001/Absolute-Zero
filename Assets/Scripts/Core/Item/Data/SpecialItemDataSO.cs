@@ -19,10 +19,11 @@ namespace AbsoluteZero.Core.Item.Data
             return true;
         }
 
-        public override void ExecuteEffect(ItemContext ctx)
+        public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
             Debug.Log($"[COMBAT] SpecialItem '{ItemName}': P{ctx.UserIndex}, effect={SpecialEffect}, value={EffectValue}, targetsSelf={TargetsSelf}");
 
+            var outcome = new ItemEffectOutcome();
             switch (SpecialEffect)
             {
                 case SpecialEffectType.FanSpeedChange:
@@ -30,25 +31,39 @@ namespace AbsoluteZero.Core.Item.Data
                     if (DelayTurns > 0)
                     {
                         Debug.Log($"[COMBAT] SpecialItem '{ItemName}': scheduled FanSpeed={EffectValue} on P{targetIdx} in {DelayTurns}t");
-                        ctx.BuffSystem.Schedule(targetIdx, EffectType.FanSpeedChange, EffectValue, DelayTurns);
+                        outcome.HasScheduledEffect = true;
+                        outcome.ScheduledTargetIndex = targetIdx;
+                        outcome.ScheduledType = EffectType.FanSpeedChange;
+                        outcome.ScheduledValue = EffectValue;
+                        outcome.ScheduledDelayTurns = DelayTurns;
                     }
                     else
                     {
                         Debug.Log($"[COMBAT] SpecialItem '{ItemName}': immediate FanSpeed={EffectValue} on P{targetIdx}");
-                        (TargetsSelf ? ctx.User : ctx.Target).FanSpeed.Value = EffectValue;
+                        if (TargetsSelf)
+                        {
+                            outcome.WriteUserFanSpeed = true;
+                            outcome.UserFanSpeedValue = EffectValue;
+                        }
+                        else
+                        {
+                            outcome.WriteTargetFanSpeed = true;
+                            outcome.TargetFanSpeedValue = EffectValue;
+                        }
                     }
                     break;
 
                 case SpecialEffectType.ExtraAction:
                     Debug.Log($"[COMBAT] SpecialItem '{ItemName}': P{ctx.UserIndex} granted ExtraAction");
-                    ctx.UserModifiers.HasExtraAction = true;
+                    outcome.GrantExtraAction = true;
                     break;
 
                 case SpecialEffectType.RevealOpponent:
                     Debug.Log($"[COMBAT] SpecialItem '{ItemName}': P{ctx.UserIndex} revealed opponent");
-                    ctx.UserModifiers.OpponentRevealed = true;
+                    outcome.RevealOpponent = true;
                     break;
             }
+            return outcome;
         }
     }
 }

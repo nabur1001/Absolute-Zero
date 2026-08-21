@@ -2,7 +2,6 @@ using AbsoluteZero.Core.Buff;
 using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Item.Data;
 using AbsoluteZero.Core.Player;
-using AbsoluteZero.Core.Turn;
 using UnityEngine;
 
 namespace AbsoluteZero.Core.Combat
@@ -15,7 +14,8 @@ namespace AbsoluteZero.Core.Combat
             PlayerState p1, PlayerState p2,
             TemperatureSystem tempSystem,
             BuffDebuffSystem buffSystem,
-            EnvironmentType environment = EnvironmentType.None)
+            EnvironmentType environment = EnvironmentType.None,
+            ItemDropTable dropTable = null)
         {
             var result = new CombatResult();
 
@@ -45,7 +45,7 @@ namespace AbsoluteZero.Core.Combat
                 Debug.Log($"[COMBAT] Executing FIRST player P{firstIdx} main: {firstQueue.selectedAction.Value.ItemData.ItemName}");
                 result.Events.Add(ExecuteMain(
                     firstQueue.selectedAction.Value, firstPlayer, secondPlayer,
-                    firstIdx, secondIdx, modifiers, tempSystem, buffSystem));
+                    firstIdx, secondIdx, modifiers, tempSystem, buffSystem, dropTable));
             }
             else
             {
@@ -73,7 +73,7 @@ namespace AbsoluteZero.Core.Combat
                 Debug.Log($"[COMBAT] Executing SECOND player P{secondIdx} main: {secondQueue.selectedAction.Value.ItemData.ItemName}");
                 result.Events.Add(ExecuteMain(
                     secondQueue.selectedAction.Value, secondPlayer, firstPlayer,
-                    secondIdx, firstIdx, modifiers, tempSystem, buffSystem));
+                    secondIdx, firstIdx, modifiers, tempSystem, buffSystem, dropTable));
             }
             else
             {
@@ -122,7 +122,8 @@ namespace AbsoluteZero.Core.Combat
                                  PlayerState user, PlayerState target,
                                  int userIdx, int targetIdx,
                                  PlayerModifiers[] modifiers,
-                                 TemperatureSystem tempSystem, BuffDebuffSystem buffSystem)
+                                 TemperatureSystem tempSystem, BuffDebuffSystem buffSystem,
+                                 ItemDropTable dropTable)
         {
             short capturedItemId = user.GetInventory().SlotStates[action.SlotIndex].ItemId;
 
@@ -143,7 +144,7 @@ namespace AbsoluteZero.Core.Combat
                 AllModifiers = modifiers,
                 TempSystem = tempSystem,
                 BuffSystem = buffSystem,
-                DropTable = TurnManager.Instance?.GetDropTable(),
+                DropTable = dropTable,
                 SlotIndex = action.SlotIndex,
                 UserSlot = user.GetInventory().SlotStates[action.SlotIndex],
             };

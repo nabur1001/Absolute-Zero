@@ -1,7 +1,11 @@
+using System;
 using AbsoluteZero.Core.Common;
 using AbsoluteZero.Core.Emote;
 using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Item.Data;
+using AbsoluteZero.Core.Match;
+using AbsoluteZero.Core.Player.Identity;
+using AbsoluteZero.Core.Turn;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -33,8 +37,12 @@ namespace AbsoluteZero.Core.Player
         public readonly NetworkVariable<bool> IsBasicBlocked = new(
             false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
+        public static event Action<Transform, Vector3, byte> OnEmoteRequested;
+
         readonly ActionQueue _actionQueue = new();
         PlayerInventory _inventory;
+        PlayerIdentity? _cachedIdentity;
+        ITurnContext _turnContext;
 
         const float MINIGAME_GRACE_SEC = 0.5f;
         int _pendingMiniGameSlot = -1;
@@ -58,6 +66,57 @@ namespace AbsoluteZero.Core.Player
             _inventory = inventory;
         }
 
+        public void BindTurnContext(ITurnContext ctx) => _turnContext = ctx;
+
+        public override void OnNetworkSpawn()
+        {
+            base.OnNetworkSpawn();
+
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr == null)
+            {
+                Debug.LogWarning("[PlayerState] MatchCompositionRoot not found — skipping registry");
+                return;
+            }
+
+            var binding = new PlayerBinding(this, GetInventory(), NetworkObject);
+            mcr.WritableRegistry.RegisterPending(OwnerClientId, binding);
+
+            SyncedPlayerIndex.OnValueChanged += OnIndexAssigned;
+
+            if (SyncedPlayerIndex.Value >= 0)
+                OnIndexAssigned(-1, SyncedPlayerIndex.Value);
+        }
+
+        void OnIndexAssigned(int prev, int cur)
+        {
+            if (cur < 0) return;
+            if (_cachedIdentity.HasValue) return;
+
+            var identity = new PlayerIdentity((byte)cur, OwnerClientId);
+            _cachedIdentity = identity;
+
+            MatchCompositionRoot.Instance?.WritableRegistry
+                .PromoteToReady(OwnerClientId, (byte)cur);
+        }
+
+        public override void OnNetworkDespawn()
+        {
+            SyncedPlayerIndex.OnValueChanged -= OnIndexAssigned;
+
+            var registry = MatchCompositionRoot.Instance?.WritableRegistry;
+            if (registry != null)
+            {
+                if (_cachedIdentity.HasValue)
+                    registry.Unregister(_cachedIdentity.Value);
+                else
+                    registry.UnregisterByClientId(OwnerClientId);
+            }
+
+            _cachedIdentity = null;
+            base.OnNetworkDespawn();
+        }
+
         public void ResetForNewTurn()
         {
             HasSelectedItem.Value = false;
@@ -67,9 +126,23 @@ namespace AbsoluteZero.Core.Player
 
         ItemContext BuildContext()
         {
-            var tm = Turn.TurnManager.Instance;
             int myIndex = SyncedPlayerIndex.Value;
-            var opponent = myIndex == 0 ? tm.GetPlayer(1) : tm.GetPlayer(0);
+
+            PlayerState opponent = null;
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr != null)
+            {
+                foreach (var p in mcr.Registry.Players)
+                {
+                    if (p.Identity.PlayerIndex != (byte)myIndex)
+                    {
+                        opponent = p.State;
+                        break;
+                    }
+                }
+            }
+            opponent ??= _turnContext.GetPlayer(myIndex == 0 ? 1 : 0);
+
             return new ItemContext
             {
                 User = this,
@@ -78,10 +151,10 @@ namespace AbsoluteZero.Core.Player
                 TargetIndex = opponent.PlayerIndex,
                 UserInventory = _inventory,
                 TargetInventory = opponent.GetInventory(),
-                AllModifiers = tm.GetModifiers(),
-                TempSystem = tm.GetTempSystem(),
-                BuffSystem = tm.GetBuffSystem(),
-                DropTable = tm.GetDropTable(),
+                AllModifiers = _turnContext.GetModifiers(),
+                TempSystem = _turnContext.GetTempSystem(),
+                BuffSystem = _turnContext.GetBuffSystem(),
+                DropTable = _turnContext.GetDropTable(),
             };
         }
 
@@ -89,7 +162,7 @@ namespace AbsoluteZero.Core.Player
         public void SelectItemServerRpc(byte slotIndex, RpcParams rpcParams = default)
         {
             if (!IsServer) return;
-            if (Turn.TurnManager.Instance.CurrentPhase.Value != TurnPhase.PrepPhase) return;
+            if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase) return;
             if (IsReady.Value) return;
             if (_pendingMiniGameSlot >= 0)
             {
@@ -125,9 +198,8 @@ namespace AbsoluteZero.Core.Player
 
             if (itemData.RequiresMiniGame)
             {
-                var tm = Turn.TurnManager.Instance;
                 double now = NetworkManager.ServerTime.Time;
-                double prepEnd = tm.PrepStartServerTime.Value + tm.PrepDuration.Value;
+                double prepEnd = _turnContext.PrepStartTime + _turnContext.PrepDurationSeconds;
                 _pendingMiniGameSlot = slotIndex;
                 _pendingMiniGameDeadline = System.Math.Min(now + itemData.MiniGameTimeLimit, prepEnd) + MINIGAME_GRACE_SEC;
 
@@ -155,7 +227,7 @@ namespace AbsoluteZero.Core.Player
 
             Debug.Log($"[PlayerState P{SyncedPlayerIndex.Value}] Item selected: {itemData.ItemName} (queued for Attack)");
 
-            Turn.TurnManager.Instance.OnItemUsedClientRpc(
+            _turnContext.PublishItemUsed(
                 (byte)SyncedPlayerIndex.Value, slotIndex, (byte)itemData.Category, false);
         }
 
@@ -176,7 +248,7 @@ namespace AbsoluteZero.Core.Player
             }
             _pendingMiniGameSlot = -1;
 
-            if (Turn.TurnManager.Instance.CurrentPhase.Value != TurnPhase.PrepPhase)
+            if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase)
             {
                 Debug.Log($"[PlayerState P{SyncedPlayerIndex.Value}] Mini-game result rejected: prep phase already over");
                 return;
@@ -231,7 +303,7 @@ namespace AbsoluteZero.Core.Player
                     if (oppSlot < oppInv.SlotStates.Count)
                         oppItemId = oppInv.SlotStates[oppSlot].ItemId;
                 }
-                Turn.TurnManager.Instance.RevealOpponentItemClientRpc(
+                _turnContext.PublishOpponentRevealed(
                     (byte)SyncedPlayerIndex.Value, oppItemId);
             }
         }
@@ -240,7 +312,7 @@ namespace AbsoluteZero.Core.Player
         public void CancelSelectionServerRpc(RpcParams rpcParams = default)
         {
             if (!IsServer) return;
-            if (Turn.TurnManager.Instance.CurrentPhase.Value != TurnPhase.PrepPhase) return;
+            if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase) return;
             if (IsReady.Value) return;
             if (!HasSelectedItem.Value) return;
 
@@ -254,7 +326,7 @@ namespace AbsoluteZero.Core.Player
         public void PressReadyServerRpc(RpcParams rpcParams = default)
         {
             if (!IsServer) return;
-            if (Turn.TurnManager.Instance.CurrentPhase.Value != TurnPhase.PrepPhase) return;
+            if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase) return;
             if (IsReady.Value) return;
 
             _pendingMiniGameSlot = -1;
@@ -263,6 +335,16 @@ namespace AbsoluteZero.Core.Player
             IsFanActive.Value = false;
 
             Debug.Log($"[PlayerState P{SyncedPlayerIndex.Value}] Ready pressed (hasItem={HasSelectedItem.Value})");
+        }
+
+        // ─── Presentation ACK ────────────────────────────────────
+
+        [Rpc(SendTo.Server)]
+        public void PresentationAckServerRpc(uint sequence, RpcParams rpcParams = default)
+        {
+            if (!IsServer) return;
+            _turnContext?.ReceivePresentationAck(
+                sequence, rpcParams.Receive.SenderClientId);
         }
 
         // ─── 도발 이모티콘 ──────────────────────────────────────
@@ -274,8 +356,7 @@ namespace AbsoluteZero.Core.Player
         public void SendEmoteServerRpc(byte emoteId, RpcParams rpcParams = default)
         {
             if (!IsServer) return;
-            var tm = Turn.TurnManager.Instance;
-            if (tm == null || !tm.AcceptEmotes) return;
+            if (_turnContext == null || !_turnContext.CanAcceptEmotes) return;
             if (emoteId >= EmoteCatalog.Count) return;
 
             _lastEmoteServerTime = NetworkManager.ServerTime.Time;
@@ -291,7 +372,7 @@ namespace AbsoluteZero.Core.Player
             Transform root = visual != null ? visual.GetVisualRoot() : null;
             if (root == null) return;
 
-            EmoteBubble.Show(root, root.position, emoteId);
+            OnEmoteRequested?.Invoke(root, root.position, emoteId);
         }
     }
 }

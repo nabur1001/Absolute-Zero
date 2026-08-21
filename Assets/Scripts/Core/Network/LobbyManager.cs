@@ -26,6 +26,10 @@ namespace AbsoluteZero.Core.Network
         private bool isHost;
         private bool isGameSessionActive;
 
+        private bool _heartbeatInFlight;
+        private bool _pollInFlight;
+        private uint _operationGeneration;
+
         public event Action<Lobby> OnLobbyCreated;
         public event Action<Lobby> OnLobbyJoined;
         public event Action<Lobby> OnLobbyUpdated;
@@ -38,6 +42,7 @@ namespace AbsoluteZero.Core.Network
         public bool IsHost => isHost;
         public bool IsInLobby => currentLobby != null;
         public bool IsGameSessionActive => isGameSessionActive;
+        public uint OperationGeneration => _operationGeneration;
         public string PlayerId => AuthenticationService.Instance?.PlayerId;
         public int MaxPlayers
         {
@@ -58,10 +63,7 @@ namespace AbsoluteZero.Core.Network
             }
         }
 
-        private async void Start()
-        {
-            await InitializeServices();
-        }
+        // Unity Services initialization moved to AppBootstrapper → coordinator
 
         private void Update()
         {
@@ -128,6 +130,7 @@ namespace AbsoluteZero.Core.Network
 
         public async Task<Lobby> CreateLobbyAsync(string lobbyName, bool isPrivate = false)
         {
+            _operationGeneration++;
             return await LobbyServiceHelper.ExecuteAsync(async () =>
             {
                 if (currentLobby != null)
@@ -163,6 +166,7 @@ namespace AbsoluteZero.Core.Network
 
         public async Task<Lobby> JoinLobbyByCodeAsync(string lobbyCode)
         {
+            _operationGeneration++;
             return await LobbyServiceHelper.ExecuteAsync(async () =>
             {
                 if (currentLobby != null)
@@ -186,6 +190,7 @@ namespace AbsoluteZero.Core.Network
 
         public async Task<Lobby> JoinLobbyByIdAsync(string lobbyId)
         {
+            _operationGeneration++;
             return await LobbyServiceHelper.ExecuteAsync(async () =>
             {
                 if (currentLobby != null)
@@ -209,6 +214,7 @@ namespace AbsoluteZero.Core.Network
 
         public async Task<Lobby> QuickJoinAsync()
         {
+            _operationGeneration++;
             return await LobbyServiceHelper.ExecuteAsync(async () =>
             {
                 if (currentLobby != null)
@@ -265,6 +271,7 @@ namespace AbsoluteZero.Core.Network
         public async Task LeaveLobbyAsync()
         {
             if (currentLobby == null) return;
+            _operationGeneration++;
 
             try
             {
@@ -435,11 +442,22 @@ namespace AbsoluteZero.Core.Network
 
         public void ForceCleanup()
         {
+            _operationGeneration++;
             currentLobby = null;
             isHost = false;
             isGameSessionActive = false;
             OnLobbyLeft?.Invoke();
         }
+
+        internal void SyncFromCoordinator(Lobby lobby, bool isHostRole)
+        {
+            currentLobby = lobby;
+            isHost = isHostRole;
+        }
+
+        internal void FireCreatedEvent() => OnLobbyCreated?.Invoke(currentLobby);
+        internal void FireJoinedEvent() => OnLobbyJoined?.Invoke(currentLobby);
+        internal void FireLeftEvent() => OnLobbyLeft?.Invoke();
 
         public void SetGameSessionActive(bool active)
         {
@@ -462,18 +480,29 @@ namespace AbsoluteZero.Core.Network
             if (heartbeatTimer <= 0f)
             {
                 heartbeatTimer = heartbeatInterval;
-                SendHeartbeatAsync();
+                _ = SendHeartbeatAsync();
             }
         }
 
-        private async void SendHeartbeatAsync()
+        private async Task SendHeartbeatAsync()
         {
-            string lobbyId = currentLobby.Id;
-            await LobbyServiceHelper.ExecuteAsync(async () =>
+            if (_heartbeatInFlight) return;
+            _heartbeatInFlight = true;
+            try
             {
-                await LobbyService.Instance.SendHeartbeatPingAsync(lobbyId);
-                Debug.Log("[LobbyManager] Heartbeat sent");
-            }, "Heartbeat");
+                string lobbyId = currentLobby?.Id;
+                if (lobbyId == null) return;
+
+                await LobbyServiceHelper.ExecuteAsync(async () =>
+                {
+                    await LobbyService.Instance.SendHeartbeatPingAsync(lobbyId);
+                    Debug.Log("[LobbyManager] Heartbeat sent");
+                }, "Heartbeat");
+            }
+            finally
+            {
+                _heartbeatInFlight = false;
+            }
         }
 
         private void HandleLobbyPoll()
@@ -485,15 +514,23 @@ namespace AbsoluteZero.Core.Network
             if (pollTimer <= 0f)
             {
                 pollTimer = lobbyPollInterval;
-                PollLobbyAsync();
+                _ = PollLobbyAsync();
             }
         }
 
-        private async void PollLobbyAsync()
+        private async Task PollLobbyAsync()
         {
+            if (_pollInFlight) return;
+            _pollInFlight = true;
             try
             {
-                var lobby = await LobbyService.Instance.GetLobbyAsync(currentLobby.Id);
+                string lobbyId = currentLobby?.Id;
+                if (lobbyId == null) return;
+                uint gen = _operationGeneration;
+
+                var lobby = await LobbyService.Instance.GetLobbyAsync(lobbyId);
+
+                if (_operationGeneration != gen || currentLobby == null) return;
                 currentLobby = lobby;
                 OnLobbyUpdated?.Invoke(currentLobby);
             }
@@ -515,9 +552,16 @@ namespace AbsoluteZero.Core.Network
             catch (Exception e)
             {
                 Debug.LogWarning($"[LobbyManager] Unexpected poll error: {e.Message}");
-                currentLobby = null;
-                isHost = false;
-                OnLobbyLeft?.Invoke();
+                if (currentLobby != null)
+                {
+                    currentLobby = null;
+                    isHost = false;
+                    OnLobbyLeft?.Invoke();
+                }
+            }
+            finally
+            {
+                _pollInFlight = false;
             }
         }
 

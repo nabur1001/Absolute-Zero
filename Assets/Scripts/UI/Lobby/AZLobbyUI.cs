@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using AbsoluteZero.Core.Network;
+using AbsoluteZero.Core.Session;
 using Unity.Services.Lobbies.Models;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -15,8 +16,7 @@ namespace AbsoluteZero.UI.LobbyUI
     public class AZLobbyUI : MonoBehaviour
     {
         private LobbyManager lobbyManager;
-        private RelayManager relayManager;
-        private SessionManager sessionManager;
+        private NetworkSessionCoordinator coordinator;
 
         private Canvas mainCanvas;
         private GameObject mainPanel;
@@ -35,7 +35,6 @@ namespace AbsoluteZero.UI.LobbyUI
         private TextMeshProUGUI lobbyStatusText;
         private TextMeshProUGUI logText;
 
-        private bool isConnectingToRelay;
         private string myPlayerId;
         private readonly Dictionary<string, string> lastKnownActions = new();
         private readonly List<GameObject> playerSlotObjects = new();
@@ -48,12 +47,13 @@ namespace AbsoluteZero.UI.LobbyUI
 
         private System.Collections.IEnumerator WaitForManagers()
         {
-            while (LobbyManager.Instance == null)
+            SetStatus("초기화 중...");
+
+            while (LobbyManager.Instance == null || NetworkSessionCoordinator.Instance == null)
                 yield return null;
 
             lobbyManager = LobbyManager.Instance;
-            relayManager = RelayManager.Instance;
-            sessionManager = SessionManager.Instance;
+            coordinator = NetworkSessionCoordinator.Instance;
 
             lobbyManager.OnLobbyCreated += OnLobbyEntered;
             lobbyManager.OnLobbyJoined += OnLobbyEntered;
@@ -61,15 +61,17 @@ namespace AbsoluteZero.UI.LobbyUI
             lobbyManager.OnLobbyLeft += OnLobbyLeft;
             lobbyManager.OnError += OnError;
 
-            if (relayManager != null)
-            {
-                relayManager.OnRelayCreated += OnRelayCreated;
-                relayManager.OnRelayJoined += OnRelayJoined;
-                relayManager.OnError += OnRelayError;
-            }
+            coordinator.OnError += OnCoordinatorError;
+            coordinator.OnStateChanged += OnCoordinatorStateChanged;
 
-            if (sessionManager != null)
-                sessionManager.OnGameStarted += OnGameStarted;
+            while (coordinator.State != SessionState.Ready && coordinator.State != SessionState.Failed)
+                yield return null;
+
+            if (coordinator.State == SessionState.Failed)
+            {
+                SetStatus($"초기화 실패: {coordinator.LastError}");
+                yield break;
+            }
 
             SetStatus("준비 완료");
         }
@@ -85,15 +87,11 @@ namespace AbsoluteZero.UI.LobbyUI
                 lobbyManager.OnError -= OnError;
             }
 
-            if (relayManager != null)
+            if (coordinator != null)
             {
-                relayManager.OnRelayCreated -= OnRelayCreated;
-                relayManager.OnRelayJoined -= OnRelayJoined;
-                relayManager.OnError -= OnRelayError;
+                coordinator.OnError -= OnCoordinatorError;
+                coordinator.OnStateChanged -= OnCoordinatorStateChanged;
             }
-
-            if (sessionManager != null)
-                sessionManager.OnGameStarted -= OnGameStarted;
         }
 
         #region Panel Control
@@ -136,15 +134,14 @@ namespace AbsoluteZero.UI.LobbyUI
 
         private async void OnCreateClicked()
         {
-            if (lobbyManager == null) return;
+            if (coordinator == null) return;
 
             createBtn.interactable = false;
             SetStatus("로비 생성 중...");
 
-            string lobbyName = $"AZ_{UnityEngine.Random.Range(1000, 9999)}";
-            var lobby = await lobbyManager.CreateLobbyAsync(lobbyName);
+            var result = await coordinator.CreateLobbyAsync();
 
-            if (lobby == null)
+            if (result.IsFailure)
             {
                 createBtn.interactable = true;
                 SetStatus("로비 생성 실패");
@@ -153,10 +150,9 @@ namespace AbsoluteZero.UI.LobbyUI
 
         private async void OnJoinClicked()
         {
-            if (lobbyManager == null) return;
+            if (coordinator == null) return;
 
-            // 이미 로비에 있으면 참가 차단 (자기 자신의 로비 자가입장 방지 포함)
-            if (lobbyManager.IsInLobby)
+            if (lobbyManager != null && lobbyManager.IsInLobby)
             {
                 SetStatus("이미 로비에 있습니다");
                 return;
@@ -173,20 +169,11 @@ namespace AbsoluteZero.UI.LobbyUI
             joinCodeInput.interactable = false;
             SetStatus($"로비 참가 중 ({code})...");
 
-            try
+            var result = await coordinator.JoinGameAsync(code);
+
+            if (result.IsFailure)
             {
-                var lobby = await lobbyManager.JoinLobbyByCodeAsync(code);
-                if (lobby == null)
-                {
-                    SetStatus("잘못된 코드입니다");
-                    joinCodeInput.text = "";
-                    joinCodeInput.interactable = true;
-                    joinBtn.interactable = true;
-                }
-            }
-            catch (Exception e)
-            {
-                SetStatus($"참가 실패: {e.Message}");
+                SetStatus($"참가 실패: {result.ErrorMessage}");
                 joinCodeInput.text = "";
                 joinCodeInput.interactable = true;
                 joinBtn.interactable = true;
@@ -195,51 +182,31 @@ namespace AbsoluteZero.UI.LobbyUI
 
         private async void OnLeaveClicked()
         {
-            if (lobbyManager == null) return;
+            if (coordinator == null) return;
             SetLobbyStatus("로비 퇴장 중...");
-            await lobbyManager.LeaveLobbyAsync();
+            await coordinator.LeaveAsync();
         }
 
         private async void OnStartClicked()
         {
-            if (lobbyManager == null || !lobbyManager.IsHost) return;
-            if (relayManager == null || sessionManager == null) return;
-            if (isConnectingToRelay) return;
+            if (coordinator == null || !coordinator.IsHostRole) return;
+            if (coordinator.State != SessionState.Ready) return;
 
-            // 혼자(상대 없음)면 시작 차단 — 시작 시 로딩에서 상대를 기다리다 갇히는 문제 방지
-            var lobby = lobbyManager.CurrentLobby;
+            var lobby = coordinator.CurrentLobby;
             if (lobby == null || lobby.Players.Count < 2)
             {
                 SetLobbyStatus("상대가 없어 시작할 수 없습니다 (2명 필요)");
                 return;
             }
 
-            isConnectingToRelay = true;
             startBtn.interactable = false;
-            SetLobbyStatus("릴레이 시작 중...");
+            SetLobbyStatus("게임 시작 중...");
 
-            try
+            var result = await coordinator.StartMatchAsHostAsync();
+
+            if (result.IsFailure)
             {
-                string relayJoinCode = await relayManager.StartHostWithRelayAsync(lobbyManager.MaxPlayers);
-
-                if (string.IsNullOrEmpty(relayJoinCode))
-                {
-                    SetLobbyStatus("릴레이 시작 실패");
-                    isConnectingToRelay = false;
-                    startBtn.interactable = true;
-                    return;
-                }
-
-                await lobbyManager.SetRelayJoinCodeAsync(relayJoinCode);
-                SetLobbyStatus($"릴레이 준비: {relayJoinCode}");
-
-                await lobbyManager.SetGameStartedAsync(true);
-                sessionManager.StartGame();
-            }
-            catch (Exception e)
-            {
-                SetLobbyStatus($"시작 실패: {e.Message}");
-                isConnectingToRelay = false;
+                SetLobbyStatus($"시작 실패: {result.ErrorMessage}");
                 startBtn.interactable = true;
             }
         }
@@ -250,67 +217,34 @@ namespace AbsoluteZero.UI.LobbyUI
 
         private void OnLobbyEntered(Unity.Services.Lobbies.Models.Lobby lobby)
         {
-            myPlayerId = lobbyManager.PlayerId;
+            myPlayerId = lobbyManager?.PlayerId;
 
-            bool canStart = lobbyManager.IsHost && relayManager != null && sessionManager != null;
-            startBtn.gameObject.SetActive(canStart);
+            bool isHost = coordinator != null && coordinator.IsHostRole;
+            startBtn.gameObject.SetActive(isHost);
 
             UpdatePlayerList(lobby);
             ShowLobbyPanel();
 
-            // 로비 입장 상태 확정: 생성/참가 컨트롤 숨기고, 코드는 그 뒤에 설정(리셋에 안 지워지도록)
             ApplyLobbyMembershipUI(true);
             lobbyCodeText.text = lobby.LobbyCode;
 
-            string hostTag = lobbyManager.IsHost ? " (호스트)" : "";
+            string hostTag = isHost ? " (호스트)" : "";
             SetLobbyStatus($"로비 참가{hostTag} — 코드: {lobby.LobbyCode}");
         }
 
         private void OnLobbyUpdated(Unity.Services.Lobbies.Models.Lobby lobby)
         {
             UpdatePlayerList(lobby);
-            CheckForGameStart(lobby);
-        }
-
-        private async void CheckForGameStart(Unity.Services.Lobbies.Models.Lobby lobby)
-        {
-            if (lobbyManager.IsHost) return;
-            if (isConnectingToRelay) return;
-            if (relayManager == null) return;
-            if (relayManager.IsRelayConnected) return;
-            if (!lobbyManager.IsGameStarted()) return;
-
-            string relayJoinCode = lobbyManager.GetRelayJoinCode();
-            if (string.IsNullOrEmpty(relayJoinCode)) return;
-
-            isConnectingToRelay = true;
-            SetLobbyStatus($"게임 시작 중... 릴레이 연결 ({relayJoinCode})");
-
-            try
-            {
-                bool success = await relayManager.JoinRelayAsync(relayJoinCode);
-                if (!success)
-                {
-                    SetLobbyStatus("릴레이 연결 실패");
-                    isConnectingToRelay = false;
-                }
-            }
-            catch (Exception e)
-            {
-                SetLobbyStatus($"릴레이 오류: {e.Message}");
-                isConnectingToRelay = false;
-            }
         }
 
         private void OnLobbyLeft()
         {
-            isConnectingToRelay = false;
             createBtn.interactable = true;
             joinBtn.interactable = true;
             joinCodeInput.interactable = true;
             joinCodeInput.text = "";
             ClearPlayerList();
-            ApplyLobbyMembershipUI(false);   // 생성/참가 컨트롤 복구 + 코드 잔존 제거
+            ApplyLobbyMembershipUI(false);
             ShowMainPanel();
             SetStatus("준비 완료");
         }
@@ -325,29 +259,36 @@ namespace AbsoluteZero.UI.LobbyUI
 
         #endregion
 
-        #region Relay Events
+        #region Coordinator Events
 
-        private void OnRelayCreated(string joinCode)
+        private void OnCoordinatorError(string error)
         {
-            SetLobbyStatus($"릴레이 생성: {joinCode}");
+            SetLobbyStatus($"오류: {error}");
         }
 
-        private void OnRelayJoined()
+        private void OnCoordinatorStateChanged(SessionState state, SessionOperation operation)
         {
-            SetLobbyStatus("릴레이 연결 완료");
-            isConnectingToRelay = false;
-        }
-
-        private void OnGameStarted()
-        {
-            SetLobbyStatus("게임 시작!");
-        }
-
-        private void OnRelayError(string error)
-        {
-            SetLobbyStatus($"릴레이 오류: {error}");
-            isConnectingToRelay = false;
-            startBtn.interactable = true;
+            switch (state)
+            {
+                case SessionState.Connecting:
+                    string opLabel = operation switch
+                    {
+                        SessionOperation.AllocatingRelay => "릴레이 할당 중...",
+                        SessionOperation.JoiningRelay => "릴레이 연결 중...",
+                        SessionOperation.StartingHost => "호스트 시작 중...",
+                        SessionOperation.StartingClient => "클라이언트 시작 중...",
+                        SessionOperation.WaitingRelayCode => "릴레이 코드 대기 중...",
+                        _ => "연결 중..."
+                    };
+                    SetLobbyStatus(opLabel);
+                    break;
+                case SessionState.LoadingGame:
+                    SetLobbyStatus("게임 로딩 중...");
+                    break;
+                case SessionState.InGame:
+                    SetLobbyStatus("게임 시작!");
+                    break;
+            }
         }
 
         #endregion
@@ -386,8 +327,7 @@ namespace AbsoluteZero.UI.LobbyUI
                 playerSlotObjects.Add(slotGO);
             }
 
-            // 혼자면 시작 버튼 비활성 (호스트 & 연결 중이 아닐 때만)
-            if (startBtn != null && lobbyManager != null && lobbyManager.IsHost && !isConnectingToRelay)
+            if (startBtn != null && coordinator != null && coordinator.IsHostRole && coordinator.State == SessionState.Ready)
                 startBtn.interactable = lobby.Players.Count >= 2;
         }
 

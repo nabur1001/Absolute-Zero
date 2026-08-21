@@ -11,7 +11,7 @@ namespace AbsoluteZero.Core.Item.Data
         public int DelayTurns = 1;
         public DamageFilter AttackFilter = DamageFilter.Food;
 
-        public override void ExecuteEffect(ItemContext ctx)
+        public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
             Debug.Log($"[COMBAT] DebuffItem '{ItemName}': P{ctx.UserIndex} → P{ctx.TargetIndex}, immediate={ImmediateTempDelta}, delayed={DelayedTempDelta} in {DelayTurns}t, filter={AttackFilter}");
 
@@ -20,28 +20,37 @@ namespace AbsoluteZero.Core.Item.Data
                 (defense.Value.Filter == AttackFilter || defense.Value.Filter == DamageFilter.All))
             {
                 Debug.Log($"[COMBAT] DebuffItem '{ItemName}': FULLY BLOCKED by defense (defFilter={defense.Value.Filter})");
-                return;
+                return new ItemEffectOutcome { Blocked = true };
             }
+
+            var outcome = new ItemEffectOutcome();
 
             if (!Mathf.Approximately(ImmediateTempDelta, 0f))
             {
                 if (ImmediateTempDelta > 0f)
                 {
                     Debug.Log($"[COMBAT] DebuffItem '{ItemName}': immediate HEAL target +{ImmediateTempDelta}");
-                    ctx.TempSystem.ApplyHeal(ctx.Target, ImmediateTempDelta);
+                    outcome.TargetHeal = ImmediateTempDelta;
                 }
                 else
                 {
                     Debug.Log($"[COMBAT] DebuffItem '{ItemName}': immediate DAMAGE target {ImmediateTempDelta}");
-                    ctx.TempSystem.ApplyDamage(ctx.Target, -ImmediateTempDelta, AttackFilter, null);
+                    outcome.TargetDamage = -ImmediateTempDelta;
+                    outcome.TargetDamageFilter = AttackFilter;
                 }
             }
 
             if (!Mathf.Approximately(DelayedTempDelta, 0f))
             {
                 Debug.Log($"[COMBAT] DebuffItem '{ItemName}': scheduled delayed={DelayedTempDelta} on P{ctx.TargetIndex} in {DelayTurns} turn(s)");
-                ctx.BuffSystem.Schedule(ctx.TargetIndex, EffectType.TempChange, DelayedTempDelta, DelayTurns);
+                outcome.HasScheduledEffect = true;
+                outcome.ScheduledTargetIndex = ctx.TargetIndex;
+                outcome.ScheduledType = EffectType.TempChange;
+                outcome.ScheduledValue = DelayedTempDelta;
+                outcome.ScheduledDelayTurns = DelayTurns;
             }
+
+            return outcome;
         }
     }
 }

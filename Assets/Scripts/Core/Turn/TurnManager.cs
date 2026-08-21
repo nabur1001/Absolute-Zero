@@ -7,12 +7,13 @@ using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Item.Data;
 using AbsoluteZero.Core.Match;
 using AbsoluteZero.Core.Player;
+using AbsoluteZero.Core.Player.Identity;
 using Unity.Netcode;
 using UnityEngine;
 
 namespace AbsoluteZero.Core.Turn
 {
-    public class TurnManager : NetworkBehaviour
+    public class TurnManager : NetworkBehaviour, ITurnContext
     {
         public static TurnManager Instance { get; private set; }
 
@@ -43,17 +44,21 @@ namespace AbsoluteZero.Core.Turn
         public static event System.Action<CombatResultData> OnCombatResult;
         public static event System.Action<EnvironmentType> OnEnvironmentAnnounced;
 
-        PlayerState _p1;
-        PlayerState _p2;
+        PlayerState[] _players = new PlayerState[2];
         PlayerModifiers[] _modifiers = new PlayerModifiers[2];
         TemperatureSystem _tempSystem;
-        CombatResolver _combatResolver;
+        CombatEngine _combatEngine;
         BuffDebuffSystem _buffSystem;
         ItemManager _itemManager;
         MatchManager _matchManager;
+        PresentationBarrier _barrier;
+        EnvironmentRuleService _envRules;
+        RoundLifecycleService _roundLifecycle;
 
-        float _p1TempAtTurnStart;
-        float _p2TempAtTurnStart;
+        [SerializeField, Min(1f)] float presentationTimeoutSeconds = 10f;
+
+        float[] _tempsAtTurnStart = new float[2];
+        uint _resultSequence;
 
         const float EMOTE_DISPLAY_SEC = 1.0f;
         bool _emoteWindowClosed;
@@ -65,14 +70,53 @@ namespace AbsoluteZero.Core.Turn
         static readonly WaitForSeconds _waitThree = new(3f);
         static readonly WaitForSeconds _waitFour = new(4f);
         static readonly WaitForSeconds _waitFive = new(5f);
-        static readonly WaitForSeconds _waitKidsSteal = new(EnvironmentVFXManager.STEAL_STAGING_DURATION);
-        static readonly WaitForSeconds _waitAmbulanceBlanket = new(EnvironmentVFXManager.BLANKET_STAGING_DURATION);
+        static readonly WaitForSeconds _waitKidsSteal = new(EnvironmentRuleService.KIDS_STEAL_STAGING_SECONDS);
+        static readonly WaitForSeconds _waitAmbulanceBlanket = new(EnvironmentRuleService.AMBULANCE_BLANKET_STAGING_SECONDS);
 
-        public PlayerState GetPlayer(int index) => index == 0 ? _p1 : _p2;
+        public PlayerState GetPlayer(int index) => _players[index];
         public PlayerModifiers[] GetModifiers() => _modifiers;
         public TemperatureSystem GetTempSystem() => _tempSystem;
         public BuffDebuffSystem GetBuffSystem() => _buffSystem;
         public ItemDropTable GetDropTable() => _itemManager != null ? _itemManager.GetDropTable() : null;
+
+        TurnPhase ITurnContext.Phase => CurrentPhase.Value;
+        bool ITurnContext.CanAcceptEmotes => AcceptEmotes;
+        double ITurnContext.PrepStartTime => PrepStartServerTime.Value;
+        float ITurnContext.PrepDurationSeconds => PrepDuration.Value;
+
+        void ITurnContext.PublishItemUsed(byte playerIdx, byte slotIdx, byte category, bool isSub)
+            => OnItemUsedClientRpc(playerIdx, slotIdx, category, isSub);
+
+        void ITurnContext.PublishOpponentRevealed(byte playerIdx, short itemId)
+            => RevealOpponentItemClientRpc(playerIdx, itemId);
+
+        // ─── Publication Methods ─────────────────────────────
+
+        void PublishPhaseChanged(TurnPhase phase, int turnNumber)
+            => OnPhaseChangedClientRpc(phase, turnNumber);
+
+        void PublishCombatResult(CombatResultData data)
+            => OnCombatResultClientRpc(data);
+
+        void PublishEnvironment(EnvironmentType env)
+            => AnnounceEnvironmentClientRpc(env);
+
+        void PublishDeathSequence(int loserIndex)
+            => TriggerDeathSequenceRpc(loserIndex);
+
+        void PublishKidsStealStaging()
+            => KidsStealStagingClientRpc();
+
+        void PublishAmbulanceBlanketStaging(bool p1IsLower)
+            => AmbulanceBlanketStagingClientRpc(p1IsLower);
+
+        void PublishDebugLog(string message)
+            => CombatDebugLogRpc(message);
+
+        void PublishReviveVisuals()
+            => ReviveVisualsClientRpc();
+
+        // ─── Lifecycle ───────────────────────────────────────
 
         public override void OnNetworkSpawn()
         {
@@ -83,17 +127,25 @@ namespace AbsoluteZero.Core.Turn
             if (IsServer)
             {
                 _tempSystem = new TemperatureSystem();
-                _combatResolver = new CombatResolver();
+                _combatEngine = new CombatEngine();
                 _buffSystem = new BuffDebuffSystem();
+                _barrier = new PresentationBarrier();
+                _envRules = new EnvironmentRuleService();
+                _roundLifecycle = new RoundLifecycleService();
 
-                _itemManager = GetComponentInParent<NetworkObject>()?.GetComponentInChildren<ItemManager>();
-                _matchManager = GetComponentInParent<NetworkObject>()?.GetComponentInChildren<MatchManager>();
+                var mcr = MatchCompositionRoot.Instance;
+                if (mcr != null)
+                {
+                    _itemManager = mcr.ItemManager;
+                    _matchManager = mcr.MatchManager;
+                }
 
                 if (_itemManager == null)
                     _itemManager = FindAnyObjectByType<ItemManager>();
                 if (_matchManager == null)
                     _matchManager = FindAnyObjectByType<MatchManager>();
 
+                NetworkManager.OnClientDisconnectCallback += OnClientDisconnectForBarrier;
                 StartCoroutine(WaitForPlayersRoutine());
             }
         }
@@ -101,52 +153,66 @@ namespace AbsoluteZero.Core.Turn
         public override void OnNetworkDespawn()
         {
             StopAllCoroutines();
+            if (IsServer && NetworkManager != null)
+                NetworkManager.OnClientDisconnectCallback -= OnClientDisconnectForBarrier;
+            _barrier?.Reset();
             OnCombatResult = null;
             OnEnvironmentAnnounced = null;
             if (Instance == this) Instance = null;
             base.OnNetworkDespawn();
         }
 
+        void OnClientDisconnectForBarrier(ulong clientId)
+        {
+            _barrier?.HandleDisconnect(clientId);
+        }
+
+        public void ReceivePresentationAck(uint sequence, ulong senderClientId)
+        {
+            _barrier?.ReceiveAck(sequence, senderClientId);
+        }
+
+        // ─── Player Discovery ────────────────────────────────
+
         IEnumerator WaitForPlayersRoutine()
         {
             CurrentPhase.Value = TurnPhase.WaitingForPlayers;
 
-            while (true)
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr == null)
             {
-                var players = FindObjectsByType<PlayerState>(FindObjectsSortMode.None);
-                if (players.Length >= 2)
-                {
-                    if (players[0].OwnerClientId <= players[1].OwnerClientId)
-                    {
-                        _p1 = players[0];
-                        _p2 = players[1];
-                    }
-                    else
-                    {
-                        _p1 = players[1];
-                        _p2 = players[0];
-                    }
-                    break;
-                }
-                yield return _waitHalf;
+                Debug.LogError("[TurnManager] MatchCompositionRoot not found — cannot discover players");
+                yield break;
             }
 
-            _p1.Initialize(0, _p1.GetComponent<PlayerInventory>());
-            _p2.Initialize(1, _p2.GetComponent<PlayerInventory>());
+            var registry = mcr.WritableRegistry;
+            while (registry.TotalCount < 2)
+                yield return _waitHalf;
+
+            var pending = new List<PlayerBinding>(registry.EnumeratePending());
+            pending.Sort((a, b) =>
+                a.NetworkObject.OwnerClientId.CompareTo(b.NetworkObject.OwnerClientId));
+
+            for (int i = 0; i < _players.Length && i < pending.Count; i++)
+            {
+                _players[i] = pending[i].State;
+                _players[i].Initialize(i, _players[i].GetComponent<PlayerInventory>());
+                _players[i].BindTurnContext(this);
+            }
 
             if (_itemManager != null)
-            {
-                _itemManager.InitializePlayerInventory(_p1.GetInventory());
-                _itemManager.InitializePlayerInventory(_p2.GetInventory());
-            }
+                for (int i = 0; i < _players.Length; i++)
+                    _itemManager.InitializePlayerInventory(_players[i].GetInventory());
 
             if (_matchManager != null)
                 _matchManager.StartRound();
 
-            Debug.Log($"[TurnManager] Players found: P1={_p1.OwnerClientId}, P2={_p2.OwnerClientId}");
+            Debug.Log($"[TurnManager] Players found via Registry: P0={_players[0].OwnerClientId}, P1={_players[1].OwnerClientId}");
 
             yield return StartCoroutine(PrepPhaseRoutine());
         }
+
+        // ─── Prep Phase ──────────────────────────────────────
 
         IEnumerator PrepPhaseRoutine()
         {
@@ -154,70 +220,39 @@ namespace AbsoluteZero.Core.Turn
             TurnNumber.Value++;
             LastRoundWinner.Value = -1;
 
-            _p1.ResetForNewTurn();
-            _p2.ResetForNewTurn();
-            _modifiers[0].Reset();
-            _modifiers[1].Reset();
+            _roundLifecycle.ResetForNewTurn(_players[0], _players[1], _modifiers);
 
-            _p1.IsReady.Value = false;
-            _p2.IsReady.Value = false;
-            _p1.Temperature.Value = Mathf.Clamp(_p1.Temperature.Value, 0f, TemperatureSystem.MAX_TEMP);
-            _p2.Temperature.Value = Mathf.Clamp(_p2.Temperature.Value, 0f, TemperatureSystem.MAX_TEMP);
+            _envRules.LogActiveEnvironment(ActiveEnvironment.Value, TurnNumber.Value);
 
-            _p1.IsFanActive.Value = true;
-            _p2.IsFanActive.Value = true;
+            float currentPrepDuration = _envRules.GetPrepDuration(ActiveEnvironment.Value, prepDuration);
 
-            if (ActiveEnvironment.Value != EnvironmentType.None)
-            {
-                Debug.Log($"[ENV] ===== Turn {TurnNumber.Value} — active: {ActiveEnvironment.Value} ({GetEnvironmentName(ActiveEnvironment.Value)}) =====");
-                if (ActiveEnvironment.Value == EnvironmentType.SunnyDay)
-                    Debug.Log("[ENV] SunnyDay: recovery rate 1 → 2°/sec (fan-off recovery doubled)");
-                else if (ActiveEnvironment.Value == EnvironmentType.CoolBreeze)
-                    Debug.Log("[ENV] CoolBreeze: recovery rate 1 → 0°/sec (no fan-off recovery)");
-                else if (ActiveEnvironment.Value == EnvironmentType.CicadaSong)
-                    Debug.Log("[ENV] CicadaSong: audio/visual distraction (no gameplay effect yet)");
-                else if (ActiveEnvironment.Value == EnvironmentType.HeatWaveWarning)
-                    Debug.Log("[ENV] HeatWave: lower-temp player acts first this turn");
-            }
-
-            float currentPrepDuration = prepDuration;
-            if (ActiveEnvironment.Value == EnvironmentType.SummerVacation)
-            {
-                currentPrepDuration = 10f;
-                Debug.Log($"[ENV] SummerVacation: prep duration {prepDuration}s → {currentPrepDuration}s");
-            }
-
-            if (ActiveEnvironment.Value == EnvironmentType.Kids && TurnNumber.Value == 3)
+            if (_envRules.ShouldApplyKidsEffect(ActiveEnvironment.Value, TurnNumber.Value))
             {
                 Debug.Log("[ENV] Kids: steal staging + removing 1 random item from each player");
-                KidsStealStagingClientRpc();
+                PublishKidsStealStaging();
                 yield return _waitKidsSteal;
-                RemoveRandomUnusedItem(_p1.GetInventory());
-                RemoveRandomUnusedItem(_p2.GetInventory());
+                for (int i = 0; i < _players.Length; i++)
+                    _envRules.RemoveRandomUnusedItem(_players[i].GetInventory());
             }
 
-            if (ActiveEnvironment.Value == EnvironmentType.Ambulance && TurnNumber.Value == 3)
+            if (_envRules.ShouldApplyAmbulanceEffect(ActiveEnvironment.Value, TurnNumber.Value))
             {
-                Debug.Log($"[ENV] Ambulance: Turn 3 triggered — P0={_p1.Temperature.Value:F1}° P1={_p2.Temperature.Value:F1}°");
-                bool p1Lower = _p1.Temperature.Value < _p2.Temperature.Value;
-                bool p2Lower = _p2.Temperature.Value < _p1.Temperature.Value;
-                if (p1Lower || p2Lower)
+                Debug.Log($"[ENV] Ambulance: Turn 3 triggered — P0={_players[0].Temperature.Value:F1}° P1={_players[1].Temperature.Value:F1}°");
+                int healTarget = _envRules.DetermineAmbulanceTarget(
+                    _players[0].Temperature.Value, _players[1].Temperature.Value);
+
+                if (healTarget >= 0)
                 {
-                    AmbulanceBlanketStagingClientRpc(p1Lower);
+                    PublishAmbulanceBlanketStaging(healTarget == 0);
                     yield return _waitAmbulanceBlanket;
                 }
 
-                if (p1Lower)
+                if (healTarget >= 0 && healTarget < _players.Length)
                 {
-                    _tempSystem.ApplyHeal(_p1, 10f);
-                    Debug.Log($"[ENV] Ambulance: P0 healed +10° → {_p1.Temperature.Value:F1}° (lower temp)");
+                    _tempSystem.ApplyHeal(_players[healTarget], 10f);
+                    Debug.Log($"[ENV] Ambulance: P{healTarget} healed +10° → {_players[healTarget].Temperature.Value:F1}° (lower temp)");
                 }
-                else if (p2Lower)
-                {
-                    _tempSystem.ApplyHeal(_p2, 10f);
-                    Debug.Log($"[ENV] Ambulance: P1 healed +10° → {_p2.Temperature.Value:F1}° (lower temp)");
-                }
-                else
+                else if (healTarget < 0)
                 {
                     Debug.Log("[ENV] Ambulance: same temp — no heal applied");
                 }
@@ -228,10 +263,10 @@ namespace AbsoluteZero.Core.Turn
 
             _emoteWindowClosed = false;
             CurrentPhase.Value = TurnPhase.PrepPhase;
-            OnPhaseChangedClientRpc(TurnPhase.PrepPhase, TurnNumber.Value);
+            PublishPhaseChanged(TurnPhase.PrepPhase, TurnNumber.Value);
 
-            _p1TempAtTurnStart = _p1.Temperature.Value;
-            _p2TempAtTurnStart = _p2.Temperature.Value;
+            for (int i = 0; i < _players.Length; i++)
+                _tempsAtTurnStart[i] = _players[i].Temperature.Value;
 
             _tempSystem.ResetTimer();
             float elapsed = 0f;
@@ -248,46 +283,52 @@ namespace AbsoluteZero.Core.Turn
                 if (newRemaining != RemainingTime.Value)
                     RemainingTime.Value = Mathf.Max(0, newRemaining);
 
-                float recoveryRate = TemperatureSystem.DEFAULT_RECOVERY_RATE;
-                if (ActiveEnvironment.Value == EnvironmentType.SunnyDay)
-                    recoveryRate = 2f;
-                else if (ActiveEnvironment.Value == EnvironmentType.CoolBreeze)
-                    recoveryRate = 0f;
+                float recoveryRate = _envRules.GetRecoveryRate(ActiveEnvironment.Value);
+                var dropTable = GetDropTable();
 
                 while (_tempSystem.ConsumeTick())
                 {
-                    _tempSystem.ApplyFanTick(_p1);
-                    _tempSystem.ApplyFanTick(_p2);
-                    _tempSystem.ApplyRecoveryTick(_p1, recoveryRate);
-                    _tempSystem.ApplyRecoveryTick(_p2, recoveryRate);
-
-                    var dropTable = GetDropTable();
-                    _tempSystem.CheckThresholds(_p1, _p1.GetInventory(), _p1.GetInventory().GetThresholdGranted(), dropTable);
-                    _tempSystem.CheckThresholds(_p2, _p2.GetInventory(), _p2.GetInventory().GetThresholdGranted(), dropTable);
+                    for (int i = 0; i < _players.Length; i++)
+                    {
+                        _tempSystem.ApplyFanTick(_players[i]);
+                        _tempSystem.ApplyRecoveryTick(_players[i], recoveryRate);
+                        _tempSystem.CheckThresholds(_players[i], _players[i].GetInventory(),
+                            _players[i].GetInventory().GetThresholdGranted(), dropTable);
+                    }
                 }
 
-                if (_tempSystem.IsDead(_p1) || _tempSystem.IsDead(_p2))
+                bool anyDead = false;
+                for (int i = 0; i < _players.Length; i++)
+                    if (_tempSystem.IsDead(_players[i])) { anyDead = true; break; }
+
+                if (anyDead)
                 {
-                    yield return StartCoroutine(HandleRoundEnd(DetermineDeathWinner()));
+                    yield return StartCoroutine(HandleRoundEnd(
+                        _roundLifecycle.DetermineDeathWinner(_tempSystem, _players[0], _players[1])));
                     yield break;
                 }
 
-                if (_p1.IsReady.Value && _p2.IsReady.Value)
-                    break;
+                bool allReady = true;
+                for (int i = 0; i < _players.Length; i++)
+                    if (!_players[i].IsReady.Value) { allReady = false; break; }
+                if (allReady) break;
 
                 yield return null;
             }
 
             RemainingTime.Value = 0;
 
-            if (!_p1.IsReady.Value) ForceReady(_p1);
-            if (!_p2.IsReady.Value) ForceReady(_p2);
-
-            RevertFanUpgrade(_p1);
-            RevertFanUpgrade(_p2);
+            for (int i = 0; i < _players.Length; i++)
+            {
+                if (!_players[i].IsReady.Value) _roundLifecycle.ForceReady(_players[i]);
+                _roundLifecycle.RevertFanUpgrade(_players[i]);
+            }
 
             _emoteWindowClosed = true;
-            double lastEmote = System.Math.Max(_p1.LastEmoteServerTime, _p2.LastEmoteServerTime);
+            double lastEmote = 0;
+            for (int i = 0; i < _players.Length; i++)
+                lastEmote = System.Math.Max(lastEmote, _players[i].LastEmoteServerTime);
+
             float emoteRemain = (float)(EMOTE_DISPLAY_SEC - (NetworkManager.ServerTime.Time - lastEmote));
             for (float t = 0f; t < emoteRemain; t += Time.deltaTime)
                 yield return null;
@@ -295,109 +336,70 @@ namespace AbsoluteZero.Core.Turn
             yield return StartCoroutine(AttackPhaseRoutine());
         }
 
-        int DetermineDeathWinner()
-        {
-            bool p1Dead = _tempSystem.IsDead(_p1);
-            bool p2Dead = _tempSystem.IsDead(_p2);
-            if (p1Dead && p2Dead) return -1;
-            if (p1Dead) return 1;
-            return 0;
-        }
-
-        void ForceReady(PlayerState player)
-        {
-            player.IsReady.Value = true;
-            player.IsFanActive.Value = false;
-            player.GetActionQueue().SetReady(Time.time);
-        }
-
-        void RevertFanUpgrade(PlayerState player)
-        {
-            if (!player.IsFanUpgraded.Value) return;
-            Debug.Log($"[COMBAT] FanSpeed revert: P{player.PlayerIndex} {player.FanSpeed.Value} → {TemperatureSystem.DEFAULT_FAN_SPEED}");
-            player.FanSpeed.Value = TemperatureSystem.DEFAULT_FAN_SPEED;
-            player.IsFanUpgraded.Value = false;
-        }
+        // ─── Attack Phase ────────────────────────────────────
 
         IEnumerator AttackPhaseRoutine()
         {
             if (!IsSpawned) yield break;
             CurrentPhase.Value = TurnPhase.AttackPhase;
-            OnPhaseChangedClientRpc(TurnPhase.AttackPhase, TurnNumber.Value);
+            PublishPhaseChanged(TurnPhase.AttackPhase, TurnNumber.Value);
 
             Debug.Log($"[COMBAT] ========== TURN {TurnNumber.Value} ATTACK PHASE START ==========");
-            Debug.Log($"[COMBAT] P0 temp={_p1.Temperature.Value:F1}° | P1 temp={_p2.Temperature.Value:F1}°");
+            Debug.Log($"[COMBAT] P0 temp={_players[0].Temperature.Value:F1}° | P1 temp={_players[1].Temperature.Value:F1}°");
 
-            _p1.IsBasicBlocked.Value = false;
-            _p2.IsBasicBlocked.Value = false;
+            for (int i = 0; i < _players.Length; i++)
+                _players[i].IsBasicBlocked.Value = false;
 
             Debug.Log($"[COMBAT] --- Processing delayed buffs/debuffs ---");
-            _buffSystem.ProcessTurnStart(_p1, _p2);
-            Debug.Log($"[COMBAT] After buffs: P0={_p1.Temperature.Value:F1}° | P1={_p2.Temperature.Value:F1}°");
+            _buffSystem.ProcessTurnStart(_players[0], _players[1]);
+            Debug.Log($"[COMBAT] After buffs: P0={_players[0].Temperature.Value:F1}° | P1={_players[1].Temperature.Value:F1}°");
 
-            var q1 = _p1.GetActionQueue();
-            var q2 = _p2.GetActionQueue();
+            var mainNames = new string[_players.Length];
+            var subNames = new string[_players.Length];
+            for (int i = 0; i < _players.Length; i++)
+            {
+                var q = _players[i].GetActionQueue();
+                mainNames[i] = q.selectedAction.HasValue ? q.selectedAction.Value.ItemData.ItemName : "NONE";
+                subNames[i] = q.subAction.HasValue ? q.subAction.Value.ItemData.ItemName : "NONE";
+            }
+            Debug.Log($"[COMBAT] P0: main={mainNames[0]}, sub={subNames[0]} | P1: main={mainNames[1]}, sub={subNames[1]}");
 
-            string p1MainName = q1.selectedAction.HasValue ? q1.selectedAction.Value.ItemData.ItemName : "NONE";
-            string p2MainName = q2.selectedAction.HasValue ? q2.selectedAction.Value.ItemData.ItemName : "NONE";
-            string p1SubName = q1.subAction.HasValue ? q1.subAction.Value.ItemData.ItemName : "NONE";
-            string p2SubName = q2.subAction.HasValue ? q2.subAction.Value.ItemData.ItemName : "NONE";
-            Debug.Log($"[COMBAT] P0: main={p1MainName}, sub={p1SubName} | P1: main={p2MainName}, sub={p2SubName}");
-
-            short p1SubId = q1.subAction.HasValue
-                ? _p1.GetInventory().SlotStates[q1.subAction.Value.SlotIndex].ItemId
-                : (short)-1;
-            short p2SubId = q2.subAction.HasValue
-                ? _p2.GetInventory().SlotStates[q2.subAction.Value.SlotIndex].ItemId
-                : (short)-1;
-            short p1MainId = q1.selectedAction.HasValue
-                ? _p1.GetInventory().SlotStates[q1.selectedAction.Value.SlotIndex].ItemId
-                : (short)-1;
-            short p2MainId = q2.selectedAction.HasValue
-                ? _p2.GetInventory().SlotStates[q2.selectedAction.Value.SlotIndex].ItemId
-                : (short)-1;
-
-            float p1TempBeforeCombat = _p1.Temperature.Value;
-            float p2TempBeforeCombat = _p2.Temperature.Value;
+            var snapshot = _combatEngine.CapturePreCombatState(
+                _players[0], _players[1], _tempsAtTurnStart[0], _tempsAtTurnStart[1]);
 
             yield return _waitOne;
             if (!IsSpawned) yield break;
 
-            Debug.Log($"[COMBAT] --- Resolving main combat ---");
-            var result = _combatResolver.Resolve(q1, q2, _modifiers, _p1, _p2, _tempSystem, _buffSystem, ActiveEnvironment.Value);
+            var result = _combatEngine.ResolveCombat(
+                _players[0], _players[1], _modifiers, _tempSystem, _buffSystem,
+                ActiveEnvironment.Value, snapshot, ref _resultSequence, GetDropTable());
 
-            result.P1TempAtTurnStart = _p1TempAtTurnStart;
-            result.P2TempAtTurnStart = _p2TempAtTurnStart;
-            result.P1TempBeforeCombat = p1TempBeforeCombat;
-            result.P2TempBeforeCombat = p2TempBeforeCombat;
-            result.P1TempAfterCombat = _p1.Temperature.Value;
-            result.P2TempAfterCombat = _p2.Temperature.Value;
-            result.P1SubItemId = p1SubId;
-            result.P2SubItemId = p2SubId;
-            result.P1MainItemId = p1MainId;
-            result.P2MainItemId = p2MainId;
+            string summary = $"Turn{TurnNumber.Value}" +
+                $" | P0: {mainNames[0]}(sub:{subNames[0]}) P1: {mainNames[1]}(sub:{subNames[1]})" +
+                $" | P0: {_tempsAtTurnStart[0]:F1}→{_players[0].Temperature.Value:F1}°" +
+                $" P1: {_tempsAtTurnStart[1]:F1}→{_players[1].Temperature.Value:F1}°" +
+                $" | {(result.WinnerIndex >= 0 ? $"P{result.WinnerIndex} WINS" : "no death")}";
+            PublishDebugLog(summary);
 
-            string winText = result.WinnerIndex >= 0 ? $"P{result.WinnerIndex} WINS" : "no death";
-            Debug.Log($"[COMBAT] ===== COMBAT RESULT: {winText} =====");
-            Debug.Log($"[COMBAT] Final temps: P0={_p1.Temperature.Value:F1}° | P1={_p2.Temperature.Value:F1}°");
-
-            string summary = $"Turn{TurnNumber.Value} | P0: {p1MainName}(sub:{p1SubName}) P1: {p2MainName}(sub:{p2SubName}) | P0: {_p1TempAtTurnStart:F1}→{_p1.Temperature.Value:F1}° P1: {_p2TempAtTurnStart:F1}→{_p2.Temperature.Value:F1}° | {winText}";
-            CombatDebugLogRpc(summary);
-
-            OnCombatResultClientRpc(result.ToNetData());
-
-            yield return _waitOne;
-            float vfxTimeout = 10f;
-            while (CombatVFXManager.Instance != null && CombatVFXManager.Instance.IsPlaying && vfxTimeout > 0f)
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr != null)
             {
-                vfxTimeout -= Time.deltaTime;
-                yield return null;
+                var expectedIds = new List<ulong>();
+                foreach (var p in mcr.Registry.Players)
+                    expectedIds.Add(p.Identity.ClientId);
+                _barrier.Begin(result.ResultSequence, expectedIds);
             }
+
+            PublishCombatResult(result.ToNetData());
+
+            yield return StartCoroutine(_barrier.WaitForCompletion(presentationTimeoutSeconds));
             yield return _waitOne;
             if (!IsSpawned) yield break;
 
             yield return StartCoroutine(ResolutionPhaseRoutine(result));
         }
+
+        // ─── Resolution Phase ────────────────────────────────
 
         IEnumerator ResolutionPhaseRoutine(CombatResult result)
         {
@@ -410,11 +412,8 @@ namespace AbsoluteZero.Core.Turn
                 yield break;
             }
 
-            var inv1 = _p1.GetInventory();
-            var inv2 = _p2.GetInventory();
-
-            inv1.CompactSlots();
-            inv2.CompactSlots();
+            for (int i = 0; i < _players.Length; i++)
+                _players[i].GetInventory().CompactSlots();
 
             yield return _waitOne;
             if (!IsSpawned) yield break;
@@ -428,6 +427,8 @@ namespace AbsoluteZero.Core.Turn
             yield return StartCoroutine(PrepPhaseRoutine());
         }
 
+        // ─── Round End ───────────────────────────────────────
+
         IEnumerator HandleRoundEnd(int winnerIndex)
         {
             if (!IsSpawned) yield break;
@@ -435,15 +436,16 @@ namespace AbsoluteZero.Core.Turn
 
             if (winnerIndex >= 0)
             {
-                int loserIdx = 1 - winnerIndex;
-                TriggerDeathSequenceRpc(loserIdx);
+                for (int i = 0; i < _players.Length; i++)
+                    if (i != winnerIndex)
+                        PublishDeathSequence(i);
             }
 
             if (winnerIndex >= 0 && _matchManager != null)
                 _matchManager.EndRound(winnerIndex);
 
             CurrentPhase.Value = TurnPhase.RoundOver;
-            OnPhaseChangedClientRpc(TurnPhase.RoundOver, TurnNumber.Value);
+            PublishPhaseChanged(TurnPhase.RoundOver, TurnNumber.Value);
 
             string winnerText = winnerIndex >= 0 ? $"P{winnerIndex + 1}" : "Draw";
             Debug.Log($"[TurnManager] Round over — Winner: {winnerText}");
@@ -462,26 +464,8 @@ namespace AbsoluteZero.Core.Turn
 
         IEnumerator StartNextRound(bool isDraw = false)
         {
-            _p1.Temperature.Value = TemperatureSystem.MAX_TEMP;
-            _p2.Temperature.Value = TemperatureSystem.MAX_TEMP;
-            _p1.IsReady.Value = false;
-            _p2.IsReady.Value = false;
-            _p1.IsFanActive.Value = false;
-            _p2.IsFanActive.Value = false;
-            _p1.FanSpeed.Value = TemperatureSystem.DEFAULT_FAN_SPEED;
-            _p2.FanSpeed.Value = TemperatureSystem.DEFAULT_FAN_SPEED;
-            _p1.IsFanUpgraded.Value = false;
-            _p2.IsFanUpgraded.Value = false;
-
-            _p1.GetInventory().ResetForNewRound();
-            _p2.GetInventory().ResetForNewRound();
-
-            var dropTable = GetDropTable();
-            if (dropTable != null)
-            {
-                _p1.GetInventory().GrantRandomItems(4, dropTable);
-                _p2.GetInventory().GrantRandomItems(4, dropTable);
-            }
+            _roundLifecycle.ResetPlayersForNewRound(_players[0], _players[1]);
+            _roundLifecycle.GrantStartingItems(_players[0], _players[1], GetDropTable());
 
             _buffSystem.ClearAll();
             ActiveEnvironment.Value = EnvironmentType.None;
@@ -490,7 +474,7 @@ namespace AbsoluteZero.Core.Turn
             if (!isDraw && _matchManager != null)
                 _matchManager.StartRound();
 
-            ReviveVisualsClientRpc();
+            PublishReviveVisuals();
 
             Debug.Log(isDraw
                 ? "[TurnManager] Draw — round voided, replaying"
@@ -499,66 +483,20 @@ namespace AbsoluteZero.Core.Turn
             yield return StartCoroutine(PrepPhaseRoutine());
         }
 
-        void ExecuteSubItems(PlayerState player, int playerIndex)
-        {
-            var queue = player.GetActionQueue();
-            if (!queue.subAction.HasValue)
-            {
-                Debug.Log($"[COMBAT] ExecuteSubItems: P{playerIndex} — no sub item");
-                return;
-            }
-
-            var action = queue.subAction.Value;
-            var inventory = player.GetInventory();
-            var opponent = playerIndex == 0 ? _p2 : _p1;
-
-            float userTempBefore = player.Temperature.Value;
-            float opponentTempBefore = opponent.Temperature.Value;
-
-            Debug.Log($"[COMBAT] ExecuteSubItems: P{playerIndex} using '{action.ItemData.ItemName}' (slot={action.SlotIndex})");
-            Debug.Log($"[COMBAT] ExecuteSubItems BEFORE: P{playerIndex}={userTempBefore:F1}° Opp={opponentTempBefore:F1}°");
-
-            var ctx = new Item.Data.ItemContext
-            {
-                User = player,
-                Target = opponent,
-                UserIndex = playerIndex,
-                TargetIndex = 1 - playerIndex,
-                UserInventory = inventory,
-                TargetInventory = opponent.GetInventory(),
-                AllModifiers = _modifiers,
-                TempSystem = _tempSystem,
-                BuffSystem = _buffSystem,
-                DropTable = GetDropTable(),
-                SlotIndex = action.SlotIndex,
-                UserSlot = inventory.SlotStates[action.SlotIndex],
-            };
-
-            action.ItemData.ExecuteEffect(ctx);
-            inventory.ConsumeItem(action.SlotIndex);
-
-            Debug.Log($"[COMBAT] ExecuteSubItems AFTER: P{playerIndex}={player.Temperature.Value:F1}° Opp={opponent.Temperature.Value:F1}°");
-        }
+        // ─── Environment ─────────────────────────────────────
 
         IEnumerator EnvironmentAnnouncementRoutine()
         {
-            var pool = new[] {
-                EnvironmentType.SunnyDay,
-                EnvironmentType.CoolBreeze,
-                EnvironmentType.CicadaSong,
-                EnvironmentType.Kids,
-                EnvironmentType.Ambulance,
-                EnvironmentType.SummerVacation,
-                EnvironmentType.HeatWaveWarning
-            };
-            ActiveEnvironment.Value = pool[Random.Range(0, pool.Length)];
+            ActiveEnvironment.Value = _envRules.SelectRandom();
 
-            Debug.Log($"[ENV] Environment selected: {ActiveEnvironment.Value} ({GetEnvironmentName(ActiveEnvironment.Value)})");
+            Debug.Log($"[ENV] Environment selected: {ActiveEnvironment.Value} ({EnvironmentRuleService.GetName(ActiveEnvironment.Value)})");
 
-            AnnounceEnvironmentClientRpc(ActiveEnvironment.Value);
+            PublishEnvironment(ActiveEnvironment.Value);
 
             yield return _waitFour;
         }
+
+        // ─── Client RPCs ─────────────────────────────────────
 
         [Rpc(SendTo.Everyone)]
         void AnnounceEnvironmentClientRpc(EnvironmentType env)
@@ -600,56 +538,16 @@ namespace AbsoluteZero.Core.Turn
             cam.transform.eulerAngles = startEuler;
         }
 
-        void RemoveRandomUnusedItem(PlayerInventory inventory)
-        {
-            if (!IsServer) return;
-
-            var candidates = new List<int>();
-            for (int i = 0; i < inventory.SlotStates.Count; i++)
-            {
-                var slot = inventory.SlotStates[i];
-                if (slot.IsEmpty) continue;
-                var itemData = inventory.GetItemData(i);
-                if (itemData == null) continue;
-                if (itemData.Persistence != ItemPersistence.RandomConsumable) continue;
-                candidates.Add(i);
-            }
-
-            if (candidates.Count == 0) return;
-
-            int targetSlot = candidates[Random.Range(0, candidates.Count)];
-            var targetItem = inventory.GetItemData(targetSlot);
-            string itemName = targetItem != null ? targetItem.ItemName : "?";
-
-            var removedSlot = inventory.SlotStates[targetSlot];
-            removedSlot.ItemId = -1;
-            removedSlot.RemainingUses = 0;
-            inventory.SlotStates[targetSlot] = removedSlot;
-            inventory.CompactSlots();
-
-            Debug.Log($"[ENV] Kids: removed '{itemName}' from slot {targetSlot}");
-        }
-
-        static string GetEnvironmentName(EnvironmentType env)
-        {
-            return env switch
-            {
-                EnvironmentType.SunnyDay => "햇살쨍쨍",
-                EnvironmentType.CoolBreeze => "바람선선",
-                EnvironmentType.CicadaSong => "매미울음",
-                EnvironmentType.Kids => "잼민이들",
-                EnvironmentType.Ambulance => "앰뷸런스",
-                EnvironmentType.SummerVacation => "여름방학",
-                EnvironmentType.HeatWaveWarning => "폭염경보",
-                _ => ""
-            };
-        }
-
         [Rpc(SendTo.Everyone)]
         void ReviveVisualsClientRpc()
         {
-            foreach (var visual in FindObjectsByType<AZPlayerVisual>(FindObjectsSortMode.None))
-                visual.ReviveVisual();
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr == null) return;
+            foreach (var p in mcr.Registry.Players)
+            {
+                var visual = p.State.GetComponent<AZPlayerVisual>();
+                if (visual != null) visual.ReviveVisual();
+            }
         }
 
         [Rpc(SendTo.Everyone)]

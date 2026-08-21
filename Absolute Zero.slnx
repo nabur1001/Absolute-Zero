@@ -1,4 +1,6 @@
 ﻿<Solution>
+  <Project Path="AbsoluteZero.UI.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="AbsoluteZero.Core.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
 </Solution>

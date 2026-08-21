@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using AbsoluteZero.Core.Audio;
+using AbsoluteZero.Core.Combat;
 using AbsoluteZero.Core.Common;
 using AbsoluteZero.Core.Inventory;
 using AbsoluteZero.Core.Item;
@@ -8,6 +10,7 @@ using AbsoluteZero.Core.Player;
 using AbsoluteZero.Core.Turn;
 using AbsoluteZero.UI.Emote;
 using AbsoluteZero.UI.MiniGame;
+using AbsoluteZero.Core.Session;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
@@ -276,6 +279,9 @@ namespace AbsoluteZero.UI.Game
             if (Instance == this) Instance = null;
             TurnManager.OnOpponentRevealed -= OnOpponentRevealed;
             TurnManager.OnEnvironmentAnnounced -= OnEnvironmentAnnounced;
+            CombatVFXManager.OnTempOverridesClear -= ClearTempOverrides;
+            CombatVFXManager.OnTempTargetsOverride -= OverrideTempTargets;
+            CombatVFXManager.OnPlayerTempOverride -= OverridePlayerTemp;
             if (_tm != null)
             {
                 _tm.CurrentPhase.OnValueChanged -= OnPhaseChanged;
@@ -349,6 +355,9 @@ namespace AbsoluteZero.UI.Game
             _tm.LastRoundWinner.OnValueChanged += OnWinnerChanged;
             TurnManager.OnOpponentRevealed += OnOpponentRevealed;
             TurnManager.OnEnvironmentAnnounced += OnEnvironmentAnnounced;
+            CombatVFXManager.OnTempOverridesClear += ClearTempOverrides;
+            CombatVFXManager.OnTempTargetsOverride += OverrideTempTargets;
+            CombatVFXManager.OnPlayerTempOverride += OverridePlayerTemp;
             OnPhaseChanged(TurnPhase.WaitingForPlayers, _tm.CurrentPhase.Value);
         }
 
@@ -495,8 +504,8 @@ namespace AbsoluteZero.UI.Game
             var basePos = rt.anchoredPosition;
             while (_alarmShaking)
             {
-                float ox = Random.Range(-8f, 8f);
-                float oy = Random.Range(-4f, 4f);
+                float ox = UnityEngine.Random.Range(-8f, 8f);
+                float oy = UnityEngine.Random.Range(-4f, 4f);
                 rt.anchoredPosition = basePos + new Vector2(ox, oy);
                 yield return _waitAlarmShake;
             }
@@ -586,7 +595,7 @@ namespace AbsoluteZero.UI.Game
         void UpdateScoreDisplay()
         {
             if (_mm == null) return;
-            _scoreText.text = $"P1  {_mm.P1RoundWins.Value} : {_mm.P2RoundWins.Value}  P2";
+            _scoreText.text = $"P1  {MatchScoreView.GetRoundWins(_mm, 0)} : {MatchScoreView.GetRoundWins(_mm, 1)}  P2";
         }
 
         void UpdateOppBarTransform()
@@ -671,12 +680,25 @@ namespace AbsoluteZero.UI.Game
                 _readyButton.interactable = false;
         }
 
-        void OnBackToLobbyClicked()
+        async void OnBackToLobbyClicked()
         {
             GameAudioManager.Instance?.PlayButtonClick();
-            var sessionManager = Core.Network.SessionManager.Instance;
-            if (sessionManager != null)
-                sessionManager.Disconnect();
+            try
+            {
+                var coordinator = NetworkSessionCoordinator.Instance;
+                if (coordinator != null)
+                    await coordinator.LeaveAsync();
+                else
+                {
+                    var sessionManager = Core.Network.SessionManager.Instance;
+                    if (sessionManager != null)
+                        sessionManager.Disconnect();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[AZGameUI] Leave failed: {e.Message}");
+            }
         }
 
 

@@ -1,5 +1,6 @@
 using System.Collections;
 using AbsoluteZero.Core.Common;
+using AbsoluteZero.Core.Network;
 using AbsoluteZero.Core.Turn;
 using TMPro;
 using Unity.Netcode;
@@ -63,6 +64,8 @@ namespace AbsoluteZero.UI.Loading
             if (Instance == null)
             {
                 Instance = this;
+                SessionManager.OnLoadingShow += Show;
+                SessionManager.OnLoadingHide += ForceHide;
             }
             else
             {
@@ -97,6 +100,8 @@ namespace AbsoluteZero.UI.Loading
         void OnDestroy()
         {
             UnregisterSceneCallback();
+            SessionManager.OnLoadingShow -= Show;
+            SessionManager.OnLoadingHide -= ForceHide;
             if (Instance == this) Instance = null;
         }
 

@@ -41,7 +41,13 @@ namespace AbsoluteZero.Core.Item.Data
         public float MiniGameTimeLimit;
         public int MiniGameGoal = 1;
 
-        public abstract void ExecuteEffect(ItemContext ctx);
+        public virtual void ExecuteEffect(ItemContext ctx)
+        {
+            var outcome = ComputeEffect(ctx);
+            ItemEffectApplicator.Apply(ctx, outcome);
+        }
+
+        public virtual ItemEffectOutcome ComputeEffect(ItemContext ctx) => default;
 
         public virtual bool CanUse(ItemContext ctx)
         {

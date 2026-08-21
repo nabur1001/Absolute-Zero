@@ -8,29 +8,31 @@ namespace AbsoluteZero.Core.Item.Data
         [Header("Sabotage")]
         public SabotageType SabotageType;
 
-        public override void ExecuteEffect(ItemContext ctx)
+        public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
             Debug.Log($"[COMBAT] SabotageItem '{ItemName}': P{ctx.UserIndex} → P{ctx.TargetIndex}, type={SabotageType}");
 
+            var outcome = new ItemEffectOutcome();
             switch (SabotageType)
             {
                 case SabotageType.Reroll:
-                    ctx.TargetInventory.RerollAllRandom(ctx.DropTable);
                     Debug.Log($"[COMBAT] SabotageItem '{ItemName}': P{ctx.TargetIndex} random items rerolled");
+                    outcome.InventoryAction = InventoryMutationType.RerollTarget;
                     break;
                 case SabotageType.Steal:
-                    ctx.UserInventory.StealRandomItem(ctx.TargetInventory);
                     Debug.Log($"[COMBAT] SabotageItem '{ItemName}': P{ctx.UserIndex} stole from P{ctx.TargetIndex}");
+                    outcome.InventoryAction = InventoryMutationType.StealFromTarget;
                     break;
                 case SabotageType.BlockBasic:
-                    ctx.Target.IsBasicBlocked.Value = true;
                     Debug.Log($"[COMBAT] SabotageItem '{ItemName}': P{ctx.TargetIndex} basic items BLOCKED next turn");
+                    outcome.BlockTargetBasics = true;
                     break;
                 case SabotageType.Neutralize:
-                    ctx.TargetModifiers.ActionNeutralized = true;
                     Debug.Log($"[COMBAT] SabotageItem '{ItemName}': P{ctx.TargetIndex} main action neutralized");
+                    outcome.NeutralizeTarget = true;
                     break;
             }
+            return outcome;
         }
     }
 }

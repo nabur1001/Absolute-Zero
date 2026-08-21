@@ -1,0 +1,21 @@
+{
+    "name": "AbsoluteZero.UI",
+    "rootNamespace": "AbsoluteZero",
+    "references": [
+        "AbsoluteZero.Core",
+        "Unity.Netcode.Runtime",
+        "Unity.TextMeshPro",
+        "Unity.InputSystem",
+        "Unity.Services.Lobbies",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

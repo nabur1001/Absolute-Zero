@@ -1,28 +1,35 @@
 # Absolute Zero — Claude Working Guidelines
 
-> Unity 6 (6000.0.73f1) | C# | 2.5D 1v1 Multiplayer Turn-Based Deathmatch | Korean comments in code
+> Unity 6 (6000.3.11f1) | C# | 2.5D current 1v1, future up-to-4-player Multiplayer Turn-Based Deathmatch | Korean comments in code
 
 ---
 
 ## Core Principles (ALWAYS FOLLOW)
 
 1. **Server-authoritative: all game state mutations must happen on Host/Server** — clients send action selection only via Rpc; temperature, turn state, and win/loss are computed server-side. Direct client-side state mutation is forbidden — causes desync.
-2. **Temperature and turn state must use NetworkVariable** — all synchronized values (temperature, turn phase, timer, action selections) must be NetworkVariable so all clients see consistent state. Do not use local fields for shared state.
+2. **Replicate current state by visibility contract** — reconnectable public state such as temperature, turn phase, and timer uses server-written NetworkVariable/NetworkList state. Secret pending action, selected item, target, and ready-order data remain server-only until an approved reveal; never place them in an Everyone-readable snapshot merely to reduce NetworkVariable count.
 3. **Never modify NetworkVariable.Value on client** — only the server/host may write to NetworkVariable. Client writes cause silent failure or exception depending on NetworkVariable permissions.
-4. **Rpc direction must match authority model** — use `[ServerRpc]` for client→server (action selection), `[ClientRpc]` for server→client (result broadcast, VFX triggers). Reversing causes runtime error.
+4. **Rpc direction must match authority model** — new NGO code uses universal `[Rpc(SendTo.Server)]` for client intent and an appropriate server-to-client `[Rpc(...)]` target for result/presentation publication. Validate sender identity from receive params. Legacy `[ServerRpc]`/`[ClientRpc]` call sites migrate only inside an approved phase.
 5. **Turn phase transitions must be atomic** — PrepTurn→AttackTurn→Resolution must go through a single state machine. Direct enum assignment from multiple call sites causes race conditions in networked context.
 6. **Cache `WaitForSeconds`** — repeated `new WaitForSeconds()` forbidden (GC pressure in coroutines).
 7. **Check `Docs/SAFETY_RULES.md` before any code modification**
-8. **All .md documentation must be written in English** — Korean is only for direct communication with the user.
+8. **Match repository documentation language policy** — write new Markdown in English unless the user explicitly requests Korean, and preserve the language/style of an existing file. `ARCHITECTURE_EVOLUTION_KO.md` and the Korean execution plans are intentional human-facing exceptions.
 9. **3-strike retry limit** — if the same action fails 3 times in a row, stop retrying and switch to an alternative approach.
 10. **Follow SOLID principles** — apply pragmatically for core systems (turn manager, network, UI).
 11. **ScriptableObject configs are runtime read-only** — SO field modification at runtime permanently corrupts Editor asset data. Read at init, copy to runtime class.
 12. **Never call `mcp__unityMCP__recompile_scripts`** — breaks MCP WebSocket connection, requires manual restart. Rely on Unity Editor auto-recompile.
 13. **Invoke `unity-*` skills when modifying Unity C# code** — 22 Unity reference skills are installed (lifecycle, state-machines, async-patterns, npc-behavior, procedural-gen, etc.). Before writing or refactoring Unity systems, invoke the matching skill to check correct patterns and avoid common mistakes.
-15. **Prefer MCP automation over manual instructions** — when Unity Editor settings, scene config, or component setup needs changing, use MCP tools (`execute_code`, `manage_components`, `manage_gameobject`, etc.) to do it directly. Only give manual instructions for things that genuinely cannot be automated (e.g., Unity Cloud Dashboard web UI).
-16. **Namespace final segment must not collide with imported type names** — `AbsoluteZero.UI.Lobby` conflicts with `Unity.Services.Lobbies.Models.Lobby`, causing CS0118. Suffix with category instead (e.g., `LobbyUI`, `PlayerVisuals`).
-18. **Design-first development** — before implementing or modifying gameplay systems (items, combat, temperature, turn flow, mini-games), read `Docs/GAME_DESIGN.md` and verify target values/behavior match the design spec. Implementation must not diverge from design without explicit user approval.
-17. **End-of-phase harness verification** — after completing each work phase:
+14. **Prefer MCP automation over manual instructions** — when Unity Editor settings, scene config, or component setup needs changing, use MCP tools (`execute_code`, `manage_components`, `manage_gameobject`, etc.) to do it directly. Only give manual instructions for things that genuinely cannot be automated (e.g., Unity Cloud Dashboard web UI).
+15. **Namespace final segment must not collide with imported type names** — `AbsoluteZero.UI.Lobby` conflicts with `Unity.Services.Lobbies.Models.Lobby`, causing CS0118. Suffix with category instead (e.g., `LobbyUI`, `PlayerVisuals`).
+16. **Design-first development** — before implementing or modifying gameplay systems (items, combat, temperature, turn flow, mini-games), read `Docs/GAME_DESIGN.md` and verify target values/behavior match the design spec. Implementation must not diverge from design without explicit user approval.
+17. **Architecture migration follows the approved phase sequence** — for architecture, async, initialization, player identity, event, pooling, player-count scaling, or asmdef refactoring, read `Docs/AI_TARGET_ARCHITECTURE.md` (target contracts), `Docs/Plans/PLAN_018_architecture_migration.md` (behavior-preserving phase sequence), and `Docs/ARCHITECTURE_EVOLUTION_KO.md` (design rationale and flows). Actual four-player gameplay belongs to `Docs/Plans/PLAN_019_four_player_expansion.md` and must not be mixed into PLAN_018. Priority: (1) current user request and actual code, (2) AI_TARGET_ARCHITECTURE contracts, (3) the active plan. Do not implement beyond the current active Phase without user approval.
+18. **Design-pattern-first planning** — before writing implementation plans:
+    1. **Pattern selection**: identify candidate design patterns (e.g., Command, Observer, Mediator, State Machine, Strangler Fig) for the target system, compare trade-offs, and select one with rationale
+    2. **API/package audit**: inspect exact installed package source/lock data and official documentation; check newer compatible APIs, deprecations, and version-specific capabilities. Do not change a package version without explicit approval plus compatibility, rollback, and multiplayer test gates
+    3. **Pattern-to-code mapping**: document in the plan how the pattern maps to concrete classes, responsibilities, and data flow before writing any code
+    Plans without these three steps are considered incomplete.
+19. **Two-to-four-player readiness without premature gameplay change** — new architecture APIs use Registry/roster collections and never introduce `_p1`/`_p2`, `1 - index`, or ClientId-as-seat assumptions. PLAN_018 preserves current 1v1 behavior. Stable seats, reconnect mapping, multi-target combat, victory rules, and four-player UI are implemented only under PLAN_019 after GAME_DESIGN decisions.
+20. **End-of-phase harness verification** — after completing each work phase:
     - `Docs/Plans/PLAN_NNN_*.md` — all completed tasks marked `[x]`
     - `Docs/RECENT_CHANGES.md` — change list recorded at top
     - `Docs/ACTIVE_CONTEXT.md` — status + last modified files updated
@@ -44,6 +51,10 @@
 | Game design & rules | GAME_DESIGN.md | `Docs/GAME_DESIGN.md` |
 | Game systems | GAME_SYSTEMS.md | `Docs/GAME_SYSTEMS.md` |
 | Network architecture | NETWORK_ARCHITECTURE.md | `Docs/NETWORK_ARCHITECTURE.md` |
+| **Architecture refactor** | **AI_TARGET_ARCHITECTURE.md** | **`Docs/AI_TARGET_ARCHITECTURE.md`** |
+| Architecture phases | PLAN_018 | `Docs/Plans/PLAN_018_architecture_migration.md` |
+| Future four-player feature | PLAN_019 | `Docs/Plans/PLAN_019_four_player_expansion.md` |
+| Architecture rationale | ARCHITECTURE_EVOLUTION_KO | `Docs/ARCHITECTURE_EVOLUTION_KO.md` |
 | Known bugs | KNOWN_ISSUES.md | `Docs/KNOWN_ISSUES.md` |
 | Network code reference | ArenaCombat_server | `C:\Users\paek6\Unity Project\ArenaCombat_server` (source project for network migration) |
 
@@ -54,8 +65,8 @@
 - **Network model:** NGO 2.11.2 (Netcode for GameObjects), Unity Relay (DTLS), Host-authoritative
 - **No DI** — singleton managers + `GetComponent<T>()` pattern (Unity standard)
 - **Namespace:** `AbsoluteZero` for all code
-- **Turn system:** `AbsoluteZeroTurnManager` — single state machine controlling PrepTurn / AttackTurn / Resolution / GameOver
-- **Data sync:** `NetworkVariable<float>` for temperature, `NetworkVariable<TurnPhase>` for turn state, `NetworkVariable<int>` for timer
+- **Turn system:** `TurnManager` — single state machine controlling WaitingForPlayers / PrepPhase / AttackPhase / ResolutionPhase / RoundOver
+- **Data sync:** current code uses individual server-written NetworkVariables and NetworkLists; any future snapshot grouping follows visibility and update-semantics rules in AI_TARGET_ARCHITECTURE
 - **Action input:** `[Rpc(SendTo.Server)]` from client → host stores in local buffer → simultaneous resolution on AttackTurn
 - **UI:** All UI is **runtime-built** (no Inspector wiring) — `AZGameUI` and `AZLobbyUI` construct Canvas/buttons/text in code. Uses TMP (TextMeshPro)
 
@@ -121,6 +132,16 @@ Assets/
    - Grep to confirm target symbol/file exists at expected location — never trust conversation history for file paths
    - Declare in the plan: files/symbols to modify AND "Will NOT touch" list
    - If grep reveals target moved or changed — update plan before proceeding
+5. **Design Pattern Verification** — before writing any implementation code:
+   - List candidate design patterns for the target system
+   - Select one with trade-off rationale (why this pattern, why not alternatives)
+   - Verify against the exact installed Unity/NGO/package versions and official vendor documentation:
+     - Are there newer APIs that simplify the pattern? (e.g., NetworkVariable vs NetworkList, Awaitable vs Coroutine)
+     - Are any planned APIs deprecated in current version?
+     - Does the package version support the pattern's requirements?
+     - Is a newer compatible non-legacy API available, and can it be adopted without broadening the phase?
+   - Document in plan: candidate patterns → selected trade-off → Class mapping → Data flow → Authority/visibility model → version evidence → validation and rollback gate
+   - Never turn an API audit into an unapproved package upgrade.
 
 ### During Work
 1. **After each step completion** — update plan checkboxes (`- [ ]` → `- [x]`)

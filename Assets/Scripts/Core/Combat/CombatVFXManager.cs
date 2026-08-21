@@ -1,14 +1,17 @@
 using System.Collections;
+using System.Collections.Generic;
 using AbsoluteZero.Core.Audio;
 using AbsoluteZero.Core.Common;
 using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Item.Data;
+using AbsoluteZero.Core.Match;
 using AbsoluteZero.Core.Player;
+using AbsoluteZero.Core.Player.Identity;
 using AbsoluteZero.Core.Turn;
 using AbsoluteZero.Core.Inventory;
-using AbsoluteZero.UI.Game;
 using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace AbsoluteZero.Core.Combat
 {
@@ -21,6 +24,34 @@ namespace AbsoluteZero.Core.Combat
         [SerializeField] GameObject _finalBreakEffectPrefab;
 
         public bool IsPlaying { get; private set; }
+
+        public static event System.Action OnTempOverridesClear;
+        public static event System.Action<float, float> OnTempTargetsOverride;
+        public static event System.Action<int, float> OnPlayerTempOverride;
+
+        uint _activeSequence;
+        bool _sequenceCompleted;
+
+        readonly Dictionary<GameObject, ObjectPool<GameObject>> _particlePools = new();
+
+        void CompletePresentationSequence()
+        {
+            if (_sequenceCompleted) return;
+            _sequenceCompleted = true;
+
+            InventoryPresenter.Instance?.UnlockRebuild();
+            OnTempOverridesClear?.Invoke();
+            IsPlaying = false;
+
+            Debug.Log($"[CombatVFX] Presentation complete: seq={_activeSequence}");
+
+            var nm = NetworkManager.Singleton;
+            if (nm != null && nm.IsConnectedClient)
+            {
+                var localPlayer = nm.LocalClient?.PlayerObject?.GetComponent<PlayerState>();
+                localPlayer?.PresentationAckServerRpc(_activeSequence);
+            }
+        }
 
         static readonly WaitForSeconds _waitIntro = new(0.5f);
         static readonly WaitForSeconds _waitBriefPause = new(0.3f);
@@ -48,6 +79,9 @@ namespace AbsoluteZero.Core.Combat
         void OnDestroy()
         {
             TurnManager.OnCombatResult -= OnCombatResult;
+            foreach (var pool in _particlePools.Values)
+                pool.Dispose();
+            _particlePools.Clear();
             if (Instance == this) Instance = null;
         }
 
@@ -59,72 +93,75 @@ namespace AbsoluteZero.Core.Combat
 
         IEnumerator PlayCombatVFXSequence(CombatResultData result)
         {
+            _activeSequence = result.ResultSequence;
+            _sequenceCompleted = false;
             IsPlaying = true;
             InventoryPresenter.Instance?.LockRebuild();
-            AZGameUI.Instance?.OverrideTempTargets(result.P1TempBeforeCombat, result.P2TempBeforeCombat);
-            var nm = NetworkManager.Singleton;
-            if (nm == null) { InventoryPresenter.Instance?.UnlockRebuild(); AZGameUI.Instance?.ClearTempOverrides(); IsPlaying = false; yield break; }
+            OnTempTargetsOverride?.Invoke(result.P1TempBeforeCombat, result.P2TempBeforeCombat);
 
-            int firstIdx = result.FirstPlayerIndex;
-            int secondIdx = 1 - firstIdx;
-
-            short firstItemId = firstIdx == 0 ? result.P1MainItemId : result.P2MainItemId;
-            short secondItemId = secondIdx == 0 ? result.P1MainItemId : result.P2MainItemId;
-
-            int deadIdx = result.WinnerIndex >= 0 ? 1 - result.WinnerIndex : -1;
-            bool firstActionKilled = result.WinnerIndex >= 0
-                && result.EventCount == 1
-                && result.Event0Source == (byte)firstIdx;
-
-            LogAttackTimingSummary(firstIdx, firstItemId, secondIdx, secondItemId, deadIdx);
-
-            yield return _waitIntro;
-
-            Debug.Log($"[CombatVFX] Sequence: first=P{firstIdx}(item={firstItemId}), second=P{secondIdx}(item={secondItemId}), deadIdx={deadIdx}");
-
-            var firstItemData = firstItemId >= 0 ? ItemManager.Instance?.GetItemData(firstItemId) : null;
-            var secondItemData = secondItemId >= 0 ? ItemManager.Instance?.GetItemData(secondItemId) : null;
-            bool secondIsDefending = secondItemData != null && secondItemData.Category == ItemCategory.Defense;
-            bool firstIsDefending = firstItemData != null && firstItemData.Category == ItemCategory.Defense;
-
-            if (firstItemId >= 0)
+            try
             {
-                Debug.Log($"[CombatVFX] Playing FIRST item sequence: P{firstIdx} item={firstItemId}, targetDefending={secondIsDefending}");
-                yield return StartCoroutine(PlayItemSequence(firstIdx, firstItemId, nm, secondIsDefending, result));
-            }
+                var nm = NetworkManager.Singleton;
+                if (nm == null) yield break;
 
-            if (firstActionKilled && deadIdx >= 0)
+                int firstIdx = result.FirstPlayerIndex;
+                int secondIdx = 1 - firstIdx;
+
+                short firstItemId = firstIdx == 0 ? result.P1MainItemId : result.P2MainItemId;
+                short secondItemId = secondIdx == 0 ? result.P1MainItemId : result.P2MainItemId;
+
+                int deadIdx = result.WinnerIndex >= 0 ? 1 - result.WinnerIndex : -1;
+                bool firstActionKilled = result.WinnerIndex >= 0
+                    && result.EventCount == 1
+                    && result.Event0Source == (byte)firstIdx;
+
+                LogAttackTimingSummary(firstIdx, firstItemId, secondIdx, secondItemId, deadIdx);
+
+                yield return _waitIntro;
+
+                Debug.Log($"[CombatVFX] Sequence seq={_activeSequence}: first=P{firstIdx}(item={firstItemId}), second=P{secondIdx}(item={secondItemId}), deadIdx={deadIdx}");
+
+                var firstItemData = firstItemId >= 0 ? ItemManager.Instance?.GetItemData(firstItemId) : null;
+                var secondItemData = secondItemId >= 0 ? ItemManager.Instance?.GetItemData(secondItemId) : null;
+                bool secondIsDefending = secondItemData != null && secondItemData.Category == ItemCategory.Defense;
+                bool firstIsDefending = firstItemData != null && firstItemData.Category == ItemCategory.Defense;
+
+                if (firstItemId >= 0)
+                {
+                    Debug.Log($"[CombatVFX] Playing FIRST item sequence: P{firstIdx} item={firstItemId}, targetDefending={secondIsDefending}");
+                    yield return StartCoroutine(PlayItemSequence(firstIdx, firstItemId, nm, secondIsDefending, result));
+                }
+
+                if (firstActionKilled && deadIdx >= 0)
+                {
+                    Debug.Log($"[CombatVFX] First action killed P{deadIdx} — playing death sequence");
+                    var deadVisual = GetPlayerVisual(deadIdx, nm);
+                    if (deadVisual != null) deadVisual.PlayDeathSequence();
+                    yield return _waitDeathSequence;
+                    yield break;
+                }
+
+                if (firstItemId >= 0 && secondItemId >= 0)
+                    yield return _waitBriefPause;
+
+                if (secondItemId >= 0)
+                {
+                    Debug.Log($"[CombatVFX] Playing SECOND item sequence: P{secondIdx} item={secondItemId}, targetDefending={firstIsDefending}");
+                    yield return StartCoroutine(PlayItemSequence(secondIdx, secondItemId, nm, firstIsDefending, result));
+                }
+
+                if (!firstActionKilled && deadIdx >= 0)
+                {
+                    Debug.Log($"[CombatVFX] Second action killed P{deadIdx} — playing death sequence");
+                    var deadVisual = GetPlayerVisual(deadIdx, nm);
+                    if (deadVisual != null) deadVisual.PlayDeathSequence();
+                    yield return _waitDeathSequence;
+                }
+            }
+            finally
             {
-                Debug.Log($"[CombatVFX] First action killed P{deadIdx} — playing death sequence");
-                var deadVisual = GetPlayerVisual(deadIdx, nm);
-                if (deadVisual != null) deadVisual.PlayDeathSequence();
-                yield return _waitDeathSequence;
-                InventoryPresenter.Instance?.UnlockRebuild();
-                AZGameUI.Instance?.ClearTempOverrides();
-                IsPlaying = false;
-                yield break;
+                CompletePresentationSequence();
             }
-
-            if (firstItemId >= 0 && secondItemId >= 0)
-                yield return _waitBriefPause;
-
-            if (secondItemId >= 0)
-            {
-                Debug.Log($"[CombatVFX] Playing SECOND item sequence: P{secondIdx} item={secondItemId}, targetDefending={firstIsDefending}");
-                yield return StartCoroutine(PlayItemSequence(secondIdx, secondItemId, nm, firstIsDefending, result));
-            }
-
-            if (!firstActionKilled && deadIdx >= 0)
-            {
-                Debug.Log($"[CombatVFX] Second action killed P{deadIdx} — playing death sequence");
-                var deadVisual = GetPlayerVisual(deadIdx, nm);
-                if (deadVisual != null) deadVisual.PlayDeathSequence();
-                yield return _waitDeathSequence;
-            }
-
-            InventoryPresenter.Instance?.UnlockRebuild();
-            AZGameUI.Instance?.ClearTempOverrides();
-            IsPlaying = false;
         }
 
         IEnumerator PlayItemSequence(int userIdx, short itemId, NetworkManager nm, bool targetDefending, CombatResultData result)
@@ -314,14 +351,14 @@ namespace AbsoluteZero.Core.Combat
         {
             if (result.EventCount > 0 && result.Event0Source == (byte)userIdx)
             {
-                AZGameUI.Instance?.OverridePlayerTemp(result.Event0Source, result.Event0UserTemp);
-                AZGameUI.Instance?.OverridePlayerTemp(result.Event0Target, result.Event0TargetTemp);
+                OnPlayerTempOverride?.Invoke(result.Event0Source, result.Event0UserTemp);
+                OnPlayerTempOverride?.Invoke(result.Event0Target, result.Event0TargetTemp);
                 return;
             }
             if (result.EventCount > 1 && result.Event1Source == (byte)userIdx)
             {
-                AZGameUI.Instance?.OverridePlayerTemp(result.Event1Source, result.Event1UserTemp);
-                AZGameUI.Instance?.OverridePlayerTemp(result.Event1Target, result.Event1TargetTemp);
+                OnPlayerTempOverride?.Invoke(result.Event1Source, result.Event1UserTemp);
+                OnPlayerTempOverride?.Invoke(result.Event1Target, result.Event1TargetTemp);
             }
         }
 
@@ -564,6 +601,14 @@ namespace AbsoluteZero.Core.Combat
 
         AZPlayerVisual GetPlayerVisual(int playerIndex, NetworkManager nm)
         {
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr != null
+                && mcr.Registry.TryGetByPlayerIndex((byte)playerIndex, out var binding)
+                && binding.NetworkObject != null)
+            {
+                return binding.NetworkObject.GetComponent<AZPlayerVisual>();
+            }
+
             foreach (var kvp in nm.SpawnManager.SpawnedObjects)
             {
                 var netObj = kvp.Value;
@@ -593,10 +638,53 @@ namespace AbsoluteZero.Core.Combat
             SpawnParticle(_finalBreakEffectPrefab, pos);
         }
 
+        static readonly WaitForSeconds _waitParticleLife = new(3f);
+
         void SpawnParticle(GameObject prefab, Vector3 pos)
         {
             if (prefab == null) return;
-            var go = Instantiate(prefab, pos, Quaternion.identity);
+            var pool = GetOrCreatePool(prefab);
+            var go = pool.Get();
+            go.transform.position = pos;
+            go.transform.rotation = Quaternion.identity;
+
+            var ps = go.GetComponent<ParticleSystem>();
+            if (ps != null) ps.Play(true);
+
+            StartCoroutine(ReturnToPoolAfterDelay(prefab, go));
+        }
+
+        ObjectPool<GameObject> GetOrCreatePool(GameObject prefab)
+        {
+            if (_particlePools.TryGetValue(prefab, out var pool))
+                return pool;
+
+            var captured = prefab;
+            pool = new ObjectPool<GameObject>(
+                createFunc: () =>
+                {
+                    var go = Instantiate(captured);
+                    ConfigureParticleRenderers(go);
+                    go.SetActive(false);
+                    return go;
+                },
+                actionOnGet: go => go.SetActive(true),
+                actionOnRelease: go =>
+                {
+                    var ps = go.GetComponent<ParticleSystem>();
+                    if (ps != null) ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    go.SetActive(false);
+                },
+                actionOnDestroy: go => Destroy(go),
+                defaultCapacity: 2,
+                maxSize: 6
+            );
+            _particlePools[prefab] = pool;
+            return pool;
+        }
+
+        static void ConfigureParticleRenderers(GameObject go)
+        {
             foreach (var psr in go.GetComponentsInChildren<ParticleSystemRenderer>(true))
             {
                 psr.sortingLayerName = "Default";
@@ -607,25 +695,42 @@ namespace AbsoluteZero.Core.Combat
                     psr.material.SetInt("_ZWrite", 0);
                 }
             }
-            Destroy(go, 3f);
+        }
+
+        IEnumerator ReturnToPoolAfterDelay(GameObject prefab, GameObject go)
+        {
+            yield return _waitParticleLife;
+            if (go != null && _particlePools.TryGetValue(prefab, out var pool))
+                pool.Release(go);
         }
 
         Vector3 GetPlayerWorldPos(int playerIndex)
         {
-            var nm = NetworkManager.Singleton;
-            if (nm == null) return Vector3.zero;
-
-            foreach (var kvp in nm.SpawnManager.SpawnedObjects)
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr != null
+                && mcr.Registry.TryGetByPlayerIndex((byte)playerIndex, out var binding)
+                && binding.NetworkObject != null)
             {
-                var netObj = kvp.Value;
-                if (netObj == null || !netObj.IsPlayerObject) continue;
-                var ps = netObj.GetComponent<PlayerState>();
-                if (ps != null && ps.PlayerIndex == playerIndex)
+                var visual = binding.NetworkObject.GetComponent<AZPlayerVisual>();
+                if (visual != null)
+                    return visual.GetVisualPosition();
+                return binding.NetworkObject.transform.position;
+            }
+
+            var nm = NetworkManager.Singleton;
+            if (nm != null)
+            {
+                foreach (var kvp in nm.SpawnManager.SpawnedObjects)
                 {
-                    var visual = netObj.GetComponent<AZPlayerVisual>();
-                    if (visual != null)
-                        return visual.GetVisualPosition();
-                    return netObj.transform.position;
+                    var netObj = kvp.Value;
+                    if (netObj == null || !netObj.IsPlayerObject) continue;
+                    var ps = netObj.GetComponent<PlayerState>();
+                    if (ps != null && ps.PlayerIndex == playerIndex)
+                    {
+                        var v = netObj.GetComponent<AZPlayerVisual>();
+                        if (v != null) return v.GetVisualPosition();
+                        return netObj.transform.position;
+                    }
                 }
             }
 

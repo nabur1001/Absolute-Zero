@@ -12,25 +12,36 @@ namespace AbsoluteZero.Core.Item.Data
         [Header("Special Mode")]
         public bool EqualizeToUserTemp;
 
-        public override void ExecuteEffect(ItemContext ctx)
+        public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
+            var outcome = new ItemEffectOutcome();
+
             if (EqualizeToUserTemp)
             {
                 float diff = ctx.Target.Temperature.Value - ctx.User.Temperature.Value;
                 Debug.Log($"[COMBAT] AttackItem '{ItemName}': EQUALIZE mode — P{ctx.UserIndex}({ctx.User.Temperature.Value:F1}°) → P{ctx.TargetIndex}({ctx.Target.Temperature.Value:F1}°), diff={diff:F1}");
                 if (diff > 0f)
-                    ctx.TempSystem.ApplyDamage(ctx.Target, diff, AttackFilter,
-                                                ctx.TargetModifiers.ActiveDefense);
+                {
+                    outcome.TargetDamage = diff;
+                    outcome.TargetDamageFilter = AttackFilter;
+                    outcome.TargetDefenseCheck = ctx.TargetModifiers.ActiveDefense;
+                }
                 else if (diff < 0f)
-                    ctx.TempSystem.ApplyHeal(ctx.Target, -diff);
+                {
+                    outcome.TargetHeal = -diff;
+                }
                 else
+                {
                     Debug.Log($"[COMBAT] AttackItem '{ItemName}': EQUALIZE — same temp, no effect");
-                return;
+                }
+                return outcome;
             }
 
             Debug.Log($"[COMBAT] AttackItem '{ItemName}': P{ctx.UserIndex} → P{ctx.TargetIndex}, damage={Damage}, filter={AttackFilter}");
-            ctx.TempSystem.ApplyDamage(ctx.Target, Damage, AttackFilter,
-                                        ctx.TargetModifiers.ActiveDefense);
+            outcome.TargetDamage = Damage;
+            outcome.TargetDamageFilter = AttackFilter;
+            outcome.TargetDefenseCheck = ctx.TargetModifiers.ActiveDefense;
+            return outcome;
         }
     }
 }

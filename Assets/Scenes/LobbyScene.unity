@@ -894,6 +894,8 @@ GameObject:
   - component: {fileID: 1354944101}
   - component: {fileID: 1354944100}
   - component: {fileID: 1354944105}
+  - component: {fileID: 1354944106}
+  - component: {fileID: 1354944107}
   m_Layer: 0
   m_Name: Managers
   m_TagString: Untagged
@@ -990,6 +992,32 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bf8fec62f2883c945b10f4b7c5905c4b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.UI.Loading.LoadingScreenManager
+--- !u!114 &1354944106
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1354944099}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8fc9c156dde43184d87c4c33135fab37, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.Core.Session.NetworkSessionCoordinator
+  relayCodeTimeoutSeconds: 30
+  maxPlayers: 2
+--- !u!114 &1354944107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1354944099}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: da7bf471cfafa5649adfed71729bf935, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.Core.Session.AppBootstrapper
 --- !u!1 &1398151285
 GameObject:
   m_ObjectHideFlags: 0
