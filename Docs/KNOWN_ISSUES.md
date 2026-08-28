@@ -9,15 +9,13 @@
 ## Active Issues
 
 ### KI-001: EnemyPlayer 렌더러 미표시
-- **Status:** Open — 런타임 2인 테스트 필요
+- **Status:** Fixed (코드) — 런타임 2인 테스트 확인 필요
 - **Category:** Visual / Network
-- **Description:** 상대 플레이어 캐릭터 스프라이트가 화면에 표시되지 않는 현상. EnemyPlayer GameObject는 GameScene에 배치됨 (player.prefab 인스턴스, 이름 오버라이드). `AZPlayerVisual.OnNetworkSpawn()`에서 `GameObject.Find("EnemyPlayer")`로 바인딩.
-- **Possible causes:**
-  1. OnNetworkSpawn 시점에 GameScene 로드 미완료 → Find 실패
-  2. SpriteRenderer material/sprite 설정 문제
-  3. 카메라 레이어/위치 미스매치
+- **Description:** 상대 플레이어 캐릭터 스프라이트가 화면에 표시되지 않는 현상. 근본 원인: 클라이언트에서 Player prefab의 `OnNetworkSpawn`이 GameScene 로드 완료 전에 실행 → `GameObject.Find("EnemyPlayer")` null 반환 후 즉시 return (재시도 없음).
+- **Fix:** `AZPlayerVisual.TryBindEnemyVisual()` 추출 + `RetryBindEnemyVisual()` 코루틴 (3초 timeout, 매 프레임 재시도). EnemyPlayer 씬 오브젝트 정상 확인 (body/arm1/arm2/head/lowerbody/item/freezeice/particles, Animator with playerA.controller, SpriteRenderers enabled).
 - **Impact:** 상대 캐릭터가 보이지 않음
 - **Discovered:** 2026-07-20
+- **Fixed:** 2026-08-27
 
 ### KI-002: SFX_wind 오디오 파일 미존재
 - **Status:** Open — 아트/오디오 에셋 필요

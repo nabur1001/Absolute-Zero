@@ -108,6 +108,7 @@ namespace AbsoluteZero.Core.Combat
         public short P1MainItemId;
         public short P2MainItemId;
         public uint ResultSequence;
+        public bool EndsMatch;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
@@ -140,6 +141,7 @@ namespace AbsoluteZero.Core.Combat
             serializer.SerializeValue(ref P1MainItemId);
             serializer.SerializeValue(ref P2MainItemId);
             serializer.SerializeValue(ref ResultSequence);
+            serializer.SerializeValue(ref EndsMatch);
         }
     }
 }

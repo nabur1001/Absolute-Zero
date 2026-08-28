@@ -41,6 +41,9 @@ namespace AbsoluteZero.Core.Turn
         public readonly NetworkVariable<EnvironmentType> ActiveEnvironment = new(
             EnvironmentType.None, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
+        public readonly NetworkVariable<byte> FirstReadySeat = new(
+            byte.MaxValue, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
         public static event System.Action<CombatResultData> OnCombatResult;
         public static event System.Action<EnvironmentType> OnEnvironmentAnnounced;
 
@@ -70,6 +73,7 @@ namespace AbsoluteZero.Core.Turn
         static readonly WaitForSeconds _waitThree = new(3f);
         static readonly WaitForSeconds _waitFour = new(4f);
         static readonly WaitForSeconds _waitFive = new(5f);
+        static readonly WaitForSeconds _waitSix = new(6f);
         static readonly WaitForSeconds _waitKidsSteal = new(EnvironmentRuleService.KIDS_STEAL_STAGING_SECONDS);
         static readonly WaitForSeconds _waitAmbulanceBlanket = new(EnvironmentRuleService.AMBULANCE_BLANKET_STAGING_SECONDS);
 
@@ -101,8 +105,8 @@ namespace AbsoluteZero.Core.Turn
         void PublishEnvironment(EnvironmentType env)
             => AnnounceEnvironmentClientRpc(env);
 
-        void PublishDeathSequence(int loserIndex)
-            => TriggerDeathSequenceRpc(loserIndex);
+        void PublishDeathSequence(int loserIndex, bool endsMatch)
+            => TriggerDeathSequenceRpc(loserIndex, endsMatch);
 
         void PublishKidsStealStaging()
             => KidsStealStagingClientRpc();
@@ -219,6 +223,7 @@ namespace AbsoluteZero.Core.Turn
             if (!IsSpawned) yield break;
             TurnNumber.Value++;
             LastRoundWinner.Value = -1;
+            FirstReadySeat.Value = byte.MaxValue;
 
             _roundLifecycle.ResetForNewTurn(_players[0], _players[1], _modifiers);
 
@@ -270,6 +275,7 @@ namespace AbsoluteZero.Core.Turn
 
             _tempSystem.ResetTimer();
             float elapsed = 0f;
+            bool skipFirstFanTick = true;
 
             RemainingTime.Value = Mathf.CeilToInt(currentPrepDuration);
 
@@ -290,21 +296,19 @@ namespace AbsoluteZero.Core.Turn
                 {
                     for (int i = 0; i < _players.Length; i++)
                     {
-                        _tempSystem.ApplyFanTick(_players[i]);
+                        if (!skipFirstFanTick)
+                            _tempSystem.ApplyFanTick(_players[i]);
                         _tempSystem.ApplyRecoveryTick(_players[i], recoveryRate);
                         _tempSystem.CheckThresholds(_players[i], _players[i].GetInventory(),
                             _players[i].GetInventory().GetThresholdGranted(), dropTable);
                     }
+                    skipFirstFanTick = false;
                 }
 
-                bool anyDead = false;
-                for (int i = 0; i < _players.Length; i++)
-                    if (_tempSystem.IsDead(_players[i])) { anyDead = true; break; }
-
-                if (anyDead)
+                var deathWinner = _roundLifecycle.DetermineDeathWinner(_tempSystem, _players[0], _players[1]);
+                if (deathWinner.HasValue)
                 {
-                    yield return StartCoroutine(HandleRoundEnd(
-                        _roundLifecycle.DetermineDeathWinner(_tempSystem, _players[0], _players[1])));
+                    yield return StartCoroutine(HandleRoundEnd(deathWinner.Value));
                     yield break;
                 }
 
@@ -323,6 +327,19 @@ namespace AbsoluteZero.Core.Turn
                 if (!_players[i].IsReady.Value) _roundLifecycle.ForceReady(_players[i]);
                 _roundLifecycle.RevertFanUpgrade(_players[i]);
             }
+
+            byte firstSeat = byte.MaxValue;
+            float earliestTimestamp = float.MaxValue;
+            for (int i = 0; i < _players.Length; i++)
+            {
+                var q = _players[i].GetActionQueue();
+                if (q.readyTimestamp > 0f && q.readyTimestamp < earliestTimestamp)
+                {
+                    earliestTimestamp = q.readyTimestamp;
+                    firstSeat = (byte)i;
+                }
+            }
+            FirstReadySeat.Value = firstSeat;
 
             _emoteWindowClosed = true;
             double lastEmote = 0;
@@ -390,9 +407,17 @@ namespace AbsoluteZero.Core.Turn
                 _barrier.Begin(result.ResultSequence, expectedIds);
             }
 
-            PublishCombatResult(result.ToNetData());
+            var netData = result.ToNetData();
+            int combatWinner = result.WinnerIndex;
+            netData.EndsMatch = combatWinner >= 0 && _matchManager != null
+                && _matchManager.WouldEndMatch(combatWinner);
+            PublishCombatResult(netData);
 
-            yield return StartCoroutine(_barrier.WaitForCompletion(presentationTimeoutSeconds));
+            yield return StartCoroutine(_barrier.WaitForCompletion(Mathf.Max(presentationTimeoutSeconds, 15f)));
+
+            if (_barrier.State == BarrierState.TimedOut)
+                Debug.LogWarning($"[TurnManager] Barrier timed out (seq={result.ResultSequence}) — proceeding");
+
             yield return _waitOne;
             if (!IsSpawned) yield break;
 
@@ -434,11 +459,14 @@ namespace AbsoluteZero.Core.Turn
             if (!IsSpawned) yield break;
             LastRoundWinner.Value = winnerIndex;
 
+            bool endsMatch = winnerIndex >= 0 && _matchManager != null
+                && _matchManager.WouldEndMatch(winnerIndex);
+
             if (winnerIndex >= 0)
             {
                 for (int i = 0; i < _players.Length; i++)
                     if (i != winnerIndex)
-                        PublishDeathSequence(i);
+                        PublishDeathSequence(i, endsMatch);
             }
 
             if (winnerIndex >= 0 && _matchManager != null)
@@ -450,7 +478,7 @@ namespace AbsoluteZero.Core.Turn
             string winnerText = winnerIndex >= 0 ? $"P{winnerIndex + 1}" : "Draw";
             Debug.Log($"[TurnManager] Round over — Winner: {winnerText}");
 
-            yield return _waitThree;
+            yield return _waitSix;
             if (!IsSpawned) yield break;
 
             if (_matchManager != null && _matchManager.IsMatchComplete())
@@ -569,7 +597,7 @@ namespace AbsoluteZero.Core.Turn
         }
 
         [Rpc(SendTo.Everyone)]
-        void TriggerDeathSequenceRpc(int loserIndex)
+        void TriggerDeathSequenceRpc(int loserIndex, bool endsMatch)
         {
             var nm = NetworkManager.Singleton;
             if (nm == null) return;
@@ -581,7 +609,7 @@ namespace AbsoluteZero.Core.Turn
                 if (ps != null && ps.PlayerIndex == loserIndex)
                 {
                     var visual = netObj.GetComponent<AZPlayerVisual>();
-                    if (visual != null) visual.PlayDeathSequence();
+                    if (visual != null) visual.PlayDeathSequence(endsMatch);
                     return;
                 }
             }
@@ -611,7 +639,22 @@ namespace AbsoluteZero.Core.Turn
         {
             var vfx = EnvironmentVFXManager.Instance;
             if (vfx == null) return;
-            bool isLocalP1 = NetworkManager.Singleton.LocalClientId == 0;
+
+            byte localSeat = 0;
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr != null)
+            {
+                var localId = NetworkManager.Singleton.LocalClientId;
+                foreach (var p in mcr.Registry.Players)
+                {
+                    if (p.Identity.ClientId == localId)
+                    {
+                        localSeat = p.Identity.PlayerIndex;
+                        break;
+                    }
+                }
+            }
+            bool isLocalP1 = localSeat == 0;
             bool healSelf = (p1IsLower && isLocalP1) || (!p1IsLower && !isLocalP1);
             vfx.PlayAmbulanceBlanketStaging(healSelf);
         }

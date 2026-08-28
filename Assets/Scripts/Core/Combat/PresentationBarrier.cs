@@ -4,33 +4,49 @@ using UnityEngine;
 
 namespace AbsoluteZero.Core.Combat
 {
+    public enum BarrierState : byte
+    {
+        Idle,
+        Waiting,
+        Completed,
+        Canceled,
+        TimedOut
+    }
+
     public sealed class PresentationBarrier
     {
         readonly HashSet<ulong> _pendingClients = new();
         uint _currentSequence;
-        bool _isActive;
 
-        public bool IsActive => _isActive;
-        public bool IsComplete => _isActive && _pendingClients.Count == 0;
+        public BarrierState State { get; private set; } = BarrierState.Idle;
+        public bool IsActive => State == BarrierState.Waiting;
+        public bool IsComplete => State == BarrierState.Completed;
         public uint CurrentSequence => _currentSequence;
 
         public void Begin(uint sequence, IEnumerable<ulong> expectedClientIds)
         {
             _currentSequence = sequence;
             _pendingClients.Clear();
-            _isActive = true;
 
             foreach (var id in expectedClientIds)
                 _pendingClients.Add(id);
 
+            if (_pendingClients.Count == 0)
+            {
+                State = BarrierState.Completed;
+                Debug.Log($"[PresentationBarrier] Begin seq={sequence}, no clients — immediate complete");
+                return;
+            }
+
+            State = BarrierState.Waiting;
             Debug.Log($"[PresentationBarrier] Begin seq={sequence}, expecting {_pendingClients.Count} clients");
         }
 
         public void ReceiveAck(uint sequence, ulong senderClientId)
         {
-            if (!_isActive)
+            if (State != BarrierState.Waiting)
             {
-                Debug.Log($"[PresentationBarrier] ACK ignored: no active barrier (seq={sequence}, sender={senderClientId})");
+                Debug.Log($"[PresentationBarrier] ACK ignored: not waiting (state={State}, seq={sequence}, sender={senderClientId})");
                 return;
             }
 
@@ -47,53 +63,56 @@ namespace AbsoluteZero.Core.Combat
             }
 
             Debug.Log($"[PresentationBarrier] ACK received: sender={senderClientId}, remaining={_pendingClients.Count}");
+
+            if (_pendingClients.Count == 0)
+                State = BarrierState.Completed;
         }
 
         public void HandleDisconnect(ulong clientId)
         {
-            if (!_isActive) return;
+            if (State != BarrierState.Waiting) return;
 
             if (_pendingClients.Remove(clientId))
+            {
                 Debug.Log($"[PresentationBarrier] Disconnect: removed {clientId}, remaining={_pendingClients.Count}");
+                if (_pendingClients.Count == 0)
+                    State = BarrierState.Completed;
+            }
         }
 
         public void Cancel(string reason)
         {
-            if (!_isActive) return;
+            if (State != BarrierState.Waiting) return;
 
             Debug.Log($"[PresentationBarrier] Cancelled: {reason} (seq={_currentSequence})");
             _pendingClients.Clear();
-            _isActive = false;
+            State = BarrierState.Canceled;
         }
 
         public IEnumerator WaitForCompletion(float timeoutSeconds)
         {
-            if (IsComplete)
-            {
-                _isActive = false;
+            if (State == BarrierState.Completed)
                 yield break;
-            }
 
             float elapsed = 0f;
-            while (!IsComplete && elapsed < timeoutSeconds)
+            while (State == BarrierState.Waiting && elapsed < timeoutSeconds)
             {
                 elapsed += Time.unscaledDeltaTime;
                 yield return null;
             }
 
-            if (!IsComplete)
+            if (State == BarrierState.Waiting)
             {
                 Debug.LogWarning($"[PresentationBarrier] Timeout after {timeoutSeconds}s (seq={_currentSequence}, pending={_pendingClients.Count})");
                 _pendingClients.Clear();
+                State = BarrierState.TimedOut;
             }
-
-            _isActive = false;
         }
 
         public void Reset()
         {
             _pendingClients.Clear();
-            _isActive = false;
+            State = BarrierState.Idle;
             _currentSequence = 0;
         }
     }

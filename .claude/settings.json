@@ -16,18 +16,18 @@
       "TodoWrite",
       "DesignSync",
       "Skill(*)",
-      "mcp__unityMCP__*",
+      "mcp__unity-mcp__*",
+      "mcp__codex__*",
       "ReadMcpResourceTool",
       "ReadMcpResourceDirTool",
       "ListMcpResourcesTool",
       "ToolSearch",
       "ReportFindings",
-      "mcp__unityMCP__manage_gameobject",
       "Bash(mkdir -p \"c:/Users/paek6/Absolute Zero/Assets/Scripts/UI/Lobby\")",
       "Bash(mkdir -p \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Match\" \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Turn\" \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Combat\" \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Item\" \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Item/Data\" \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Buff\" \"c:/Users/paek6/Absolute Zero/Assets/Scripts/Core/Common\" \"c:/Users/paek6/Absolute Zero/Assets/ScriptableObjects/Items\")"
     ],
     "deny": [
-      "mcp__unityMCP__recompile_scripts"
+      "mcp__unity-mcp__recompile_scripts"
     ],
     "additionalDirectories": [
       "C:\\Users\\paek6\\.claude",

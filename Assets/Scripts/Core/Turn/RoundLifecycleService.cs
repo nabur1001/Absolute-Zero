@@ -7,10 +7,11 @@ namespace AbsoluteZero.Core.Turn
 {
     public class RoundLifecycleService
     {
-        public int DetermineDeathWinner(TemperatureSystem tempSystem, PlayerState p1, PlayerState p2)
+        public int? DetermineDeathWinner(TemperatureSystem tempSystem, PlayerState p1, PlayerState p2)
         {
             bool p1Dead = tempSystem.IsDead(p1);
             bool p2Dead = tempSystem.IsDead(p2);
+            if (!p1Dead && !p2Dead) return null;
             if (p1Dead && p2Dead) return -1;
             if (p1Dead) return 1;
             return 0;

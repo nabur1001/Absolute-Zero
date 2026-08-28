@@ -1,18 +1,50 @@
 # Absolute Zero — Game Design Document
 
-> **Genre**: 2.5D 1v1 Turn-Based Deathmatch | **Format**: Bo3 (3 rounds, first to 2 wins)
+> **Genre**: 2.5D Turn-Based Deathmatch | **Modes**: 1v1 / Multi (3~4) / Solo (vs Bot)
 > **Visual**: 3D Korean pavilion (정자) + 2D hand-drawn characters/items
-> **Network**: Host-authoritative, Unity Relay
+> **Network**: Host-authoritative, Unity Relay (1v1/Multi) / Local (Solo)
 
 ---
 
 ## Overview
 
-Two players sit across a wooden floor (마루). Each has a **fan blowing cold air**, lowering their body temperature. Use items to attack, defend, or sabotage. **First to reach 0° loses the round.**
+Players sit across a wooden floor (마루). Each has a **fan blowing cold air**, lowering their body temperature. Use items to attack, defend, or sabotage. **First to reach 0° is frozen.**
 
 ```
 Starting Temp: 37°  |  Fan: -1°/sec  |  Prep Time: 20s  |  Defeat: 0°  |  Recovery: 1°/sec (after Ready)
 ```
+
+---
+
+## Game Modes
+
+| Mode | Players | Win Condition | Scene | Death Rule |
+|------|---------|--------------|-------|------------|
+| **1v1** | 2 (online) | Bo3 — first to 2 round wins | `GameScene` | 0° = round ends |
+| **Multi** | 3~4 (online) | First to **5 kills** (cumulative across rounds) | `GameScene_Multi` (NEW) | 0° = ghost, round continues |
+| **Solo** | 1 + BT Bot | Same as 1v1 (Bo3) | `GameScene` or `GameScene_Solo` | Same as 1v1 |
+
+### Mode Details
+
+**1v1 (현행 + 개선):**
+- Bo3 format, Ready-press order attack, defense always first
+- Improvements: 1s prep immunity, 3s animation timing, UI/visual enhancements
+- No post-death attacks
+
+**Multi (3~4인 전용):**
+- Kill-based scoring (5 kills to win, co-victory possible)
+- Death → Ghost state (debuff trolling, ghost kills count as score)
+- Round ends when ≤1 player alive (or all dead simultaneously)
+- Round reset: all revive at 37°, items/thresholds fully reset, kill score persists
+- Drag-to-target item selection
+- Separate balance: Windbreaker 1-use, max 4 random items, threshold grants all 1 each
+- Initial random item grant at game start (2 items)
+
+**Solo (1인 + 봇):**
+- Same rules as 1v1
+- BT AI bot with 2~3 difficulty levels
+- No Relay needed, local host execution
+- Bot execution: TBD (server virtual bot vs client process)
 
 ---
 
@@ -342,7 +374,44 @@ Check: opponent 0°? → round end or next turn
 
 ---
 
+## 1v1 Improvements (2026-08 additions)
+
+### System Changes
+
+| Change | Detail |
+|--------|--------|
+| **Prep Phase 1s immunity** | First 1 second of PrepPhase: fan natural temperature decrease disabled. Item effects and recovery apply normally |
+| **3s animation timing** | All item animations unified to 3s total duration (animation + wait) during Attack Phase |
+| **Defense always first** | Windbreaker activates before any attack regardless of Ready order (existing behavior reinforced) |
+| **Cat reroll timing** | Cat item reroll triggers at cat walk-animation timing, not instantly |
+
+### UI Enhancements
+
+| Change | Detail |
+|--------|--------|
+| **Lobby UI redesign** | Full visual redesign to casual style matching game concept |
+| **Progress HUD** | Top-center: nicknames, crown icon on first-Ready player, active attacker box color highlight |
+| **Item selection arrow** | Arrow object above selected item for clear visual feedback |
+| **Ready button sprite** | Pressed state changes to "lit" sprite (art asset needed) |
+| **Nickname system** | TBD — lobby input / Auth ID / separate account system |
+
+### Visual Enhancements
+
+| Change | Detail |
+|--------|--------|
+| **Round end cinematic** | 1s fade-out → winner name + score rise animation → 1s fade-in. Final winner: character displayed center |
+| **Damage effect upgrade** | Vignette edge effect + camera shake + ice particle burst on hit |
+| **Feed animation fix** | Item position aligned to mouth + item sprite matches used item |
+| **Eat/drink sprite fix** | Use actual item sprite instead of generic |
+| **Defeat animation fix** | Freeze → particle burst → Idle return (next round start via ReviveVisual) |
+| **Final defeat particle** | Additional ice shard particle on final round defeat |
+| **Hover tuning** | HoverEffect scale/outline parameters increased (no code change, value tuning) |
+
+---
+
 ## Win Conditions
+
+### 1v1 Mode
 
 | Condition | Result |
 |-----------|--------|
@@ -350,6 +419,16 @@ Check: opponent 0°? → round end or next turn
 | Self temp = 0° | Lose the round |
 | Both reach 0° simultaneously | Draw — round voided, replay (no score change) |
 | First to **2 round wins** | Match victory |
+
+### Multi Mode (3~4)
+
+| Condition | Result |
+|-----------|--------|
+| Any player reaches 0° | That player enters **Ghost state** — round continues |
+| ≤1 player alive (or all dead) | Round ends → all revive at 37° → next round |
+| First to **5 kills** (cumulative) | Match victory |
+| Multiple players reach 5 kills simultaneously | Co-victory |
+| Ghost kill via debuff | Counts toward ghost player's kill score |
 
 ---
 
@@ -375,6 +454,182 @@ All mutations server-side: damage, healing, time, win/loss, item use, buff/debuf
 
 ---
 
+## Multi-Player System (3~4인 전용)
+
+> Completely separate from 1v1. Different scene, different balance, different win condition.
+
+### Balance Differences from 1v1
+
+| Parameter | 1v1 | Multi |
+|-----------|-----|-------|
+| Win condition | Bo3 round wins | 5 kills (cumulative) |
+| Max random items | 8 | **4** |
+| Initial random grant | None | **2 at game start** |
+| 30° threshold | +1 item | **+1 item** |
+| 20° threshold | +2 items | **+1 item** |
+| 10° threshold | +3 items | **+1 item** |
+| Windbreaker | Permanent | **1-use (Consumable)** |
+| Tarot Card | Available | **Removed from drop table** |
+| Icebox position | Left-center | **Center** |
+| Death rule | Round ends | Ghost state, round continues |
+| Deathmatch grant | N/A | **2 players left → instant 4 random items** |
+
+### Target Selection
+
+- Item use requires **drag-to-target** on the target character
+- Re-clicking a targeted item cancels the selection
+- Reference: Slay the Spire targeting UX
+
+### Round Flow (Multi)
+
+```
+ROUND START (all at 37°, items reset, threshold reset)
+     ↓
+PREP PHASE (20s, 1s immunity)
+  - Select item + drag-to-target
+  - Press Ready → fan off, recovery
+     ↓
+ATTACK PHASE (3s per item, defense first)
+  - Execute in Ready-press order
+  - If player reaches 0° → Ghost state (round continues!)
+  - Remaining players keep fighting
+     ↓
+CHECK: ≤1 alive or all dead?
+  YES → Round over, prep text, next round
+  NO  → Next turn (PrepPhase again)
+     ↓
+KILL SCORE: cumulative across rounds
+FIRST TO 5 KILLS → MATCH VICTORY
+```
+
+---
+
+## Ghost System (다인전 전용)
+
+> Players who reach 0° become ghosts. They can't use items or participate in turns, but can use debuff skills to troll surviving players. Ghost kills count toward score.
+
+### Ghost State Flow
+
+```
+Player reaches 0°
+  ↓
+Freeze animation → ice particle burst → character disappears
+  ↓
+Ghost prefab replaces character (semi-transparent, ~0.4 alpha)
+  ↓
+Ghost cannot: use items, press Ready, participate in PrepPhase turn flow
+Ghost can: use debuff skills on surviving players (free-form, outside turn structure)
+  ↓
+If ghost's debuff causes a kill → ghost gets the kill score
+  ↓
+Round ends (≤1 alive) → all revive at 37° for next round
+```
+
+### Ghost Debuff Skills
+
+> Values are initial estimates — balance via playtesting.
+
+| Skill | Effect | Cooldown | Duration |
+|-------|--------|----------|----------|
+| **Frost Strike** | Target temp instantly −3~5° | 1 turn | Instant |
+| **Chill Aura** | Target fan decrease rate ×2, recovery effectiveness ×0.5 | 1 turn | 1 turn (until next PrepPhase end) |
+
+- Target selection: click on surviving player (same as item targeting)
+- Ghost visual: semi-transparent character near the play area (TBD — exact visual/movement)
+- Skill cooldown prevents infinite debuff spam
+
+### TBD — Ghost System
+
+| Item | Status |
+|------|--------|
+| Exact damage value for Frost Strike | Playtest |
+| Chill Aura stacking with other debuffs | Playtest |
+| Ghost movement/positioning on screen | TBD |
+| Ghost skill UI (buttons? click target?) | TBD |
+
+---
+
+## Post-Death Attack System (다인전 전용)
+
+When a player dies:
+1. Existing items are removed
+2. Ghost-exclusive **skills** are granted (not items)
+3. Skills operate outside the normal turn structure — ghost acts freely while alive players take turns
+4. Ghost's PrepPhase/Ready mechanics are completely disabled
+
+---
+
+## Solo Play / Bot AI
+
+| Parameter | Value |
+|-----------|-------|
+| Rules | Same as 1v1 (Bo3) |
+| Network | Local host, no Relay |
+| Bot execution | TBD (A: server virtual bot, B: client process) |
+| Difficulty | 2~3 levels |
+| Logic | Separate from network multiplayer logic |
+
+### Bot AI Requirements
+
+- BT (Behavior Tree) based decision making
+- Must handle: item selection, Ready timing, mini-game participation
+- Difficulty affects: item choice quality, Ready timing optimization, mini-game success rate
+- Existing handover doc: `Docs/BOT_AI_HANDOVER.md` (server-side virtual bot structure)
+
+---
+
+## Customization System
+
+### Lobby Integration
+
+Lobby screen elements:
+- **Solo Play** button
+- **Multi Play** button
+- **Closet (옷장)** button → opens customization canvas
+- **Settings** button
+- **Nickname** text input
+
+### Character Customization
+
+5-part equipment system. Reference: Among Us customization UI.
+
+| Part | Sprite Target | Implementation |
+|------|--------------|----------------|
+| Head (머리) | head child | Overlay SpriteRenderer |
+| Top (상의) | body child | Sprite swap or overlay |
+| Back (등) | body child (behind) | Overlay (sortOrder adjusted) |
+| Bottom (하의) | lowerbody child | Sprite swap or overlay |
+| Tail (꼬리) | NEW child object | Overlay SpriteRenderer |
+
+### Implementation Approach (Hybrid)
+
+- **Color/tone changes** → Material tint
+- **Part additions** (hat, tail, back decoration) → Overlay SpriteRenderer as child of target part
+- **Part replacements** (top, bottom variant) → Sprite swap (same pivot/size variant sprites)
+
+### Equipment Logic
+
+- Click to equip/unequip
+- Equipping a different item in the same part → auto-unequip previous
+- Unlock: currently all available (A), future transition to play-based unlock (B)
+
+---
+
+## Scene Structure
+
+```
+LobbyScene (build 0)
+  ├── Nickname input
+  ├── Solo Play → GameScene (1v1 rules + Bot AI, no Relay)
+  ├── Multi Play
+  │     ├── 1v1 (2 players) → GameScene (Bo3, Relay)
+  │     └── 3~4 players → GameScene_Multi (5-kill, Relay)
+  ├── Closet → Customization Canvas (overlay)
+  └── Settings → Settings Canvas (overlay)
+```
+
+---
+
 ## Open Questions (기획 확인 필요)
 
 ### Resolved
@@ -393,6 +648,7 @@ All mutations server-side: damage, healing, time, win/loss, item use, buff/debuf
 | Q18 | **스마트폰 사용 횟수** | ✅ 3회 사용, 회복량 3→5→7° (기획서 확인, SO MaxUses=3, HealPerUse=[3,5,7]) |
 | Q15 | **상대방 아이템 보유 목록** | ✅ EnemyItem 위치에 서버가 내려주는 목록 표시. 소모 시 시각적 제거, 재획득 시 다시 표시. 서버 권위 |
 | Q17 | **환경 시스템** | ✅ 데모에는 미포함, 이후 추가 |
+| Q20 | **라운드 간 리셋 범위** | ✅ 전체 초기화: 전원 37° 부활, 아이템/버프/threshold 지급 이력 모두 리셋. 킬 스코어만 라운드 누적 (다인전) |
 
 ### Resolved: Mini-Game Judgment Model (Q11)
 
@@ -435,7 +691,15 @@ PrepPhase 타이머 만료 → 서버가 턴 종료 판정 → 클라이언트�
 |---|----------|---------|
 | Q16 | **아이템 슬롯 UI 레이아웃** — 기본 4 + 랜덤 8 배치 방식? 빈 슬롯 표시? | 현재: 4칸만 |
 | Q19 | **안아줘요 티셔츠 역효과** — 내 온도 > 상대 온도면 상대를 회복시킴. 의도된 리스크? 효과 없음 처리? | 코드: diff ≤ 0이면 ApplyHeal(상대) |
-| Q20 | **라운드 간 리셋 범위** — 랜덤 아이템/버프/지급 이력 등 어디까지 초기화? | 코드: 전부 초기화(임의) |
 | Q21 | **버프/디버프 중첩** — 같은 효과 다중 적용 가능? 삼계탕 2연속 = -14°? | 코드: 무제한 중첩 |
 | Q22 | **이번 턴 선택 아이템 상대 공개** — 보유 목록은 공개(Q15)지만, 뭘 골랐는지는? | 코드: 비공개 |
 | Q23 | **지연 효과 발동 시 방어 가능 여부** — 삼계탕 -7° 발동 턴에 방어 아이템으로 차단? | 코드: 방어 무시 |
+
+### Pending — Ghost System (다인전)
+
+| # | Question | Context |
+|---|----------|---------|
+| Q24 | **Frost Strike 데미지** — 즉시 −3°? −5°? | 플레이테스트 결정 |
+| Q25 | **Chill Aura 디버프 중첩** — 복수 고스트 Aura 동시 적용 시 효과? | 플레이테스트 결정 |
+| Q26 | **고스트 위치/이동** — 화면 어디에? 자유 이동? 고정 위치? | TBD |
+| Q27 | **고스트 스킬 UI** — 버튼? 드래그? | TBD |

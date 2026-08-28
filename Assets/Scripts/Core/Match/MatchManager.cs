@@ -58,6 +58,15 @@ namespace AbsoluteZero.Core.Match
             return P1RoundWins.Value >= WINS_TO_MATCH || P2RoundWins.Value >= WINS_TO_MATCH;
         }
 
+        public bool WouldEndMatch(int winnerIndex)
+        {
+            if (winnerIndex == 0)
+                return P1RoundWins.Value + 1 >= WINS_TO_MATCH;
+            if (winnerIndex == 1)
+                return P2RoundWins.Value + 1 >= WINS_TO_MATCH;
+            return false;
+        }
+
         public bool IsRoundOver()
         {
             return CurrentMatchState.Value == MatchState.RoundEnd

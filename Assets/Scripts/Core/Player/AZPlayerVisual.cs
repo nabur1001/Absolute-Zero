@@ -31,6 +31,7 @@ namespace AbsoluteZero.Core.Player
         Coroutine _flashCoroutine;
         Coroutine _animEndCoroutine;
         Coroutine _deathCoroutine;
+        Coroutine _bindCoroutine;
         bool _isDead;
         Vector3 _deathSavedPos;
 
@@ -68,19 +69,21 @@ namespace AbsoluteZero.Core.Player
             }
 
             Debug.Log($"[PlayerVisual] OnNetworkSpawn IsRemote — setting up EnemyPlayer visuals");
+            if (!TryBindEnemyVisual())
+                _bindCoroutine = StartCoroutine(RetryBindEnemyVisual());
+        }
+
+        bool TryBindEnemyVisual()
+        {
             var enemyGO = GameObject.Find("EnemyPlayer");
-            if (enemyGO == null)
-            {
-                Debug.LogWarning("[PlayerVisual] EnemyPlayer GameObject NOT FOUND");
-                return;
-            }
+            if (enemyGO == null) return false;
 
             _visualRoot = enemyGO.transform;
             _animator = enemyGO.GetComponent<Animator>();
             if (_animator == null)
                 _animator = enemyGO.GetComponentInChildren<Animator>();
 
-            Debug.Log($"[PlayerVisual] EnemyPlayer: animator={(_animator != null)}, controller={(_animator != null && _animator.runtimeAnimatorController != null ? _animator.runtimeAnimatorController.name : "NONE")}");
+            Debug.Log($"[PlayerVisual] EnemyPlayer bound: animator={(_animator != null)}, controller={(_animator?.runtimeAnimatorController != null ? _animator.runtimeAnimatorController.name : "NONE")}");
 
             _spriteRenderers = enemyGO.GetComponentsInChildren<SpriteRenderer>(true);
             _cachedMaterials = new Material[_spriteRenderers.Length];
@@ -98,7 +101,6 @@ namespace AbsoluteZero.Core.Player
             {
                 _itemRenderer = _itemTransform.GetComponent<SpriteRenderer>();
                 _itemTransform.gameObject.SetActive(false);
-                Debug.Log($"[PlayerVisual] item child found: renderer={(_itemRenderer != null)}");
             }
 
             BuildFreezeObject(_visualRoot);
@@ -112,6 +114,25 @@ namespace AbsoluteZero.Core.Player
                 _finalBreakParticle = finalBreakT.GetComponent<ParticleSystem>();
 
             Debug.Log($"[PlayerVisual] Particles: iceBreak={(_iceBreakParticle != null)}, finalBreak={(_finalBreakParticle != null)}");
+            return true;
+        }
+
+        IEnumerator RetryBindEnemyVisual()
+        {
+            float elapsed = 0f;
+            const float timeout = 3f;
+            while (elapsed < timeout)
+            {
+                yield return null;
+                elapsed += Time.unscaledDeltaTime;
+                if (TryBindEnemyVisual())
+                {
+                    _bindCoroutine = null;
+                    yield break;
+                }
+            }
+            Debug.LogError($"[PlayerVisual] EnemyPlayer NOT FOUND after {timeout}s — visual binding failed");
+            _bindCoroutine = null;
         }
 
         void BuildFreezeObject(Transform visual)
@@ -243,10 +264,14 @@ namespace AbsoluteZero.Core.Player
                 _freezeRenderer.gameObject.SetActive(false);
         }
 
-        public void PlayDeathSequence()
+        bool _endsMatch;
+
+        public void PlayDeathSequence(bool endsMatch = false)
         {
             if (_isDead) return;
-            Debug.Log("[PlayerVisual] PlayDeathSequence START");
+            Debug.Log($"[PlayerVisual] PlayDeathSequence START (endsMatch={endsMatch})");
+            _endsMatch = endsMatch;
+            _deathSavedPos = _visualRoot != null ? _visualRoot.position : transform.position;
 
             if (_flashCoroutine != null)
             {
@@ -270,6 +295,12 @@ namespace AbsoluteZero.Core.Player
 
             _isDead = true;
             _deathCoroutine = StartCoroutine(DeathRoutine());
+        }
+
+        public Coroutine PlayDeathSequenceAndWait(bool endsMatch)
+        {
+            PlayDeathSequence(endsMatch);
+            return _deathCoroutine;
         }
 
         IEnumerator DeathRoutine()
@@ -297,16 +328,20 @@ namespace AbsoluteZero.Core.Player
 
             GameAudioManager.Instance?.PlayIceBreak();
             CameraShake.Instance?.Shake(0.5f, 0.3f);
-            PlayBreakParticles();
+            PlayBreakParticles(_endsMatch);
+
+            if (_endsMatch)
+            {
+                yield return _waitFreezeHold;
+                _deathCoroutine = null;
+                yield break;
+            }
 
             if (_freezeRenderer != null)
                 _freezeRenderer.gameObject.SetActive(false);
 
-            if (_visualRoot != null)
-            {
-                _deathSavedPos = _visualRoot.position;
-                _visualRoot.position = new Vector3(0f, -100f, 0f);
-            }
+            if (_animator != null)
+                _animator.Play("Idle_Tree", 0, 0f);
 
             _deathCoroutine = null;
         }
@@ -342,14 +377,14 @@ namespace AbsoluteZero.Core.Player
             _isDead = false;
         }
 
-        void PlayBreakParticles()
+        void PlayBreakParticles(bool heavy = false)
         {
             if (_iceBreakParticle != null)
             {
                 _iceBreakParticle.gameObject.SetActive(true);
                 _iceBreakParticle.Play();
             }
-            if (_finalBreakParticle != null)
+            if (heavy && _finalBreakParticle != null)
             {
                 _finalBreakParticle.gameObject.SetActive(true);
                 _finalBreakParticle.Play();

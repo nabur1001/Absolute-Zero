@@ -32,6 +32,8 @@ namespace AbsoluteZero.Core.Combat
 
         RawImage _frost;   // 피격 (서리)
         RawImage _warm;    // 회복 (온기)
+        RawImage _vignette; // 피격 비네트
+        Texture2D _vignetteTexture;
         Coroutine _flash;
 
         void Awake()
@@ -44,6 +46,7 @@ namespace AbsoluteZero.Core.Combat
         void OnDestroy()
         {
             if (_instance == this) _instance = null;
+            if (_vignetteTexture != null) Destroy(_vignetteTexture);
         }
 
         void BuildOverlay()
@@ -52,10 +55,35 @@ namespace AbsoluteZero.Core.Combat
             canvasGO.transform.SetParent(transform, false);
             var canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 200;   // 미니게임(50) 등보다 위, 화면 최상단 프레임
+            canvas.sortingOrder = 200;
 
             _frost = CreateFullScreen(canvasGO.transform, "Frost", "background_VFX1");
+            _vignette = CreateFullScreen(canvasGO.transform, "Vignette", null);
+            _vignetteTexture = GenerateVignetteTexture(128);
+            _vignette.texture = _vignetteTexture;
             _warm = CreateFullScreen(canvasGO.transform, "Warm", "background_VFX2");
+        }
+
+        static Texture2D GenerateVignetteTexture(int size)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            float half = size * 0.5f;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float dx = (x - half) / half;
+                float dy = (y - half) / half;
+                float dist = Mathf.Sqrt(dx * dx + dy * dy);
+                float alpha = Mathf.Clamp01((dist - 0.5f) / 0.5f);
+                alpha *= alpha;
+                tex.SetPixel(x, y, new Color(0f, 0f, 0f, alpha));
+            }
+            tex.Apply();
+            return tex;
         }
 
         static RawImage CreateFullScreen(Transform parent, string name, string resourceTex)
@@ -75,33 +103,41 @@ namespace AbsoluteZero.Core.Combat
             return ri;
         }
 
-        /// <summary>피격(온도 하락) — 서리 프레임 플래시</summary>
-        public void PlayHitVFX() => Flash(_frost);
+        public void PlayHitVFX()
+        {
+            Flash(_frost, _vignette);
+        }
 
-        /// <summary>회복(온도 상승) — 온기 프레임 플래시</summary>
-        public void PlayRecoveryVFX() => Flash(_warm);
+        public void PlayRecoveryVFX()
+        {
+            Flash(_warm, null);
+        }
 
-        void Flash(RawImage target)
+        void Flash(RawImage target, RawImage secondary)
         {
             if (target == null) return;
             if (_flash != null) StopCoroutine(_flash);
-            _flash = StartCoroutine(FlashRoutine(target));
+            _flash = StartCoroutine(FlashRoutine(target, secondary));
         }
 
-        IEnumerator FlashRoutine(RawImage target)
+        IEnumerator FlashRoutine(RawImage target, RawImage secondary)
         {
-            // 다른 오버레이는 즉시 숨김 (서리/온기 겹침 방지)
             if (_frost != null && _frost != target) _frost.color = new Color(1f, 1f, 1f, 0f);
             if (_warm != null && _warm != target) _warm.color = new Color(1f, 1f, 1f, 0f);
+            if (_vignette != null && _vignette != target && _vignette != secondary)
+                _vignette.color = new Color(1f, 1f, 1f, 0f);
 
             float t = 0f;
             while (t < fadeInDuration)
             {
                 t += Time.deltaTime;
-                SetAlpha(target, Mathf.Lerp(0f, peakAlpha, t / fadeInDuration));
+                float a = Mathf.Lerp(0f, peakAlpha, t / fadeInDuration);
+                SetAlpha(target, a);
+                if (secondary != null) SetAlpha(secondary, a);
                 yield return null;
             }
             SetAlpha(target, peakAlpha);
+            if (secondary != null) SetAlpha(secondary, peakAlpha);
 
             if (holdDuration > 0f) yield return new WaitForSeconds(holdDuration);
 
@@ -109,10 +145,13 @@ namespace AbsoluteZero.Core.Combat
             while (t < fadeOutDuration)
             {
                 t += Time.deltaTime;
-                SetAlpha(target, Mathf.Lerp(peakAlpha, 0f, t / fadeOutDuration));
+                float a = Mathf.Lerp(peakAlpha, 0f, t / fadeOutDuration);
+                SetAlpha(target, a);
+                if (secondary != null) SetAlpha(secondary, a);
                 yield return null;
             }
             SetAlpha(target, 0f);
+            if (secondary != null) SetAlpha(secondary, 0f);
             _flash = null;
         }
 

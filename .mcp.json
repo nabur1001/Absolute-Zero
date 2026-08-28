@@ -1,8 +1,20 @@
 {
   "mcpServers": {
-    "unityMCP": {
-      "type": "http",
-      "url": "http://127.0.0.1:8080/mcp"
+    "unity-mcp": {
+      "type": "stdio",
+      "command": "C:\\Users\\paek6\\.unity\\relay\\relay_win.exe",
+      "args": [
+        "--mcp",
+        "--project-path",
+        "C:\\Users\\paek6\\Absolute Zero"
+      ]
+    },
+    "codex": {
+      "type": "stdio",
+      "command": "C:\\Users\\paek6\\AppData\\Local\\OpenAI\\Codex\\bin\\d0097be4feba73d0\\codex.exe",
+      "args": [
+        "mcp-server"
+      ]
     }
   }
 }

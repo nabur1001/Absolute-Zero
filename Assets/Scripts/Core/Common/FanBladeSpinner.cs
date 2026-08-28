@@ -113,9 +113,13 @@ namespace AbsoluteZero.Core.Common
                 if (netObj == null || !netObj.IsPlayerObject) continue;
 
                 bool match;
-                if (playerIndex == -1) match = netObj.OwnerClientId == nm.LocalClientId;        // 로컬
-                else if (playerIndex == -2) match = netObj.OwnerClientId != nm.LocalClientId;    // 상대
-                else match = netObj.OwnerClientId == (ulong)playerIndex;                          // 특정 clientId
+                if (playerIndex == -1) match = netObj.OwnerClientId == nm.LocalClientId;
+                else if (playerIndex == -2) match = netObj.OwnerClientId != nm.LocalClientId;
+                else
+                {
+                    var ps = netObj.GetComponent<PlayerState>();
+                    match = ps != null && ps.PlayerIndex == playerIndex;
+                }
 
                 if (match)
                 {

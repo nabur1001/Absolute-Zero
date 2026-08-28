@@ -158,10 +158,11 @@ namespace AbsoluteZero.Core.Player
             };
         }
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         public void SelectItemServerRpc(byte slotIndex, RpcParams rpcParams = default)
         {
             if (!IsServer) return;
+            if (rpcParams.Receive.SenderClientId != OwnerClientId) return;
             if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase) return;
             if (IsReady.Value) return;
             if (_pendingMiniGameSlot >= 0)
@@ -237,10 +238,11 @@ namespace AbsoluteZero.Core.Player
             OnMiniGameStart?.Invoke(slotIndex, (MiniGameType)miniGameType, timeLimit, goal);
         }
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         public void SubmitMiniGameResultServerRpc(byte slotIndex, bool success, RpcParams rpcParams = default)
         {
             if (!IsServer) return;
+            if (rpcParams.Receive.SenderClientId != OwnerClientId) return;
             if (_pendingMiniGameSlot != slotIndex)
             {
                 Debug.Log($"[PlayerState P{SyncedPlayerIndex.Value}] Mini-game result rejected: no pending game for slot {slotIndex}");
@@ -308,10 +310,11 @@ namespace AbsoluteZero.Core.Player
             }
         }
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         public void CancelSelectionServerRpc(RpcParams rpcParams = default)
         {
             if (!IsServer) return;
+            if (rpcParams.Receive.SenderClientId != OwnerClientId) return;
             if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase) return;
             if (IsReady.Value) return;
             if (!HasSelectedItem.Value) return;
@@ -322,10 +325,11 @@ namespace AbsoluteZero.Core.Player
             Debug.Log($"[PlayerState P{SyncedPlayerIndex.Value}] Selection cancelled");
         }
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         public void PressReadyServerRpc(RpcParams rpcParams = default)
         {
             if (!IsServer) return;
+            if (rpcParams.Receive.SenderClientId != OwnerClientId) return;
             if (_turnContext == null || _turnContext.Phase != TurnPhase.PrepPhase) return;
             if (IsReady.Value) return;
 
@@ -339,10 +343,11 @@ namespace AbsoluteZero.Core.Player
 
         // ─── Presentation ACK ────────────────────────────────────
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         public void PresentationAckServerRpc(uint sequence, RpcParams rpcParams = default)
         {
             if (!IsServer) return;
+            if (rpcParams.Receive.SenderClientId != OwnerClientId) return;
             _turnContext?.ReceivePresentationAck(
                 sequence, rpcParams.Receive.SenderClientId);
         }
@@ -352,10 +357,11 @@ namespace AbsoluteZero.Core.Player
         double _lastEmoteServerTime = -100.0;
         public double LastEmoteServerTime => _lastEmoteServerTime;
 
-        [Rpc(SendTo.Server)]
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         public void SendEmoteServerRpc(byte emoteId, RpcParams rpcParams = default)
         {
             if (!IsServer) return;
+            if (rpcParams.Receive.SenderClientId != OwnerClientId) return;
             if (_turnContext == null || !_turnContext.CanAcceptEmotes) return;
             if (emoteId >= EmoteCatalog.Count) return;
 

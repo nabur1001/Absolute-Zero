@@ -34,11 +34,16 @@ namespace AbsoluteZero.Core.Inventory
         // --- Rebuild lock (E1: deadlock prevention) ---
         bool _rebuildLocked;
         float _rebuildLockTime;
-        const float REBUILD_LOCK_TIMEOUT = 8f;
+        const float REBUILD_LOCK_TIMEOUT = 15f;
 
         // --- Opponent item views ---
         GameObject[] _opponentItemObjects;
         bool _needsOpponentRebuild;
+
+        // --- Selection arrow ---
+        GameObject _selectionArrow;
+        SpriteRenderer _arrowRenderer;
+        Texture2D _arrowTexture;
 
         // --- Layout constants ---
         const float FALLBACK_SPACING = 0.9f;
@@ -63,6 +68,8 @@ namespace AbsoluteZero.Core.Inventory
         void OnDestroy()
         {
             Unbind();
+            if (_arrowTexture != null) Destroy(_arrowTexture);
+            if (_selectionArrow != null) Destroy(_selectionArrow);
             if (Instance == this) Instance = null;
         }
 
@@ -80,6 +87,25 @@ namespace AbsoluteZero.Core.Inventory
 
             if (_localBound)
                 HandleClick();
+
+            if (_selectionArrow != null && _selectionArrow.activeSelf)
+            {
+                if (TurnManager.Instance == null
+                    || TurnManager.Instance.CurrentPhase.Value != TurnPhase.PrepPhase)
+                {
+                    _selectionArrow.SetActive(false);
+                }
+                else if (_confirmedSlotIndex >= 0
+                    && _localViews != null
+                    && _confirmedSlotIndex < _localViews.Length
+                    && _localViews[_confirmedSlotIndex] != null)
+                {
+                    var basePos = _localViews[_confirmedSlotIndex].transform.position
+                                  + new Vector3(0f, 0.6f, 0f);
+                    float bounce = Mathf.Sin(Time.time * 4f) * 0.05f;
+                    _selectionArrow.transform.position = basePos + new Vector3(0f, bounce, 0f);
+                }
+            }
         }
 
         void LateUpdate()
@@ -510,6 +536,54 @@ namespace AbsoluteZero.Core.Inventory
                     _localViews[i].SetInteractable(!isBanned && !hasSelected && usable);
                 }
             }
+
+            UpdateArrowVisibility();
+        }
+
+        void EnsureArrow()
+        {
+            if (_selectionArrow != null) return;
+            _selectionArrow = new GameObject("SelectionArrow");
+
+            const int size = 32;
+            _arrowTexture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            int halfW = size / 2;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float ny = (float)y / size;
+                float hw = halfW * (1f - ny);
+                bool inside = x >= halfW - hw && x <= halfW + hw;
+                _arrowTexture.SetPixel(x, y, inside ? Color.white : Color.clear);
+            }
+            _arrowTexture.Apply();
+            _arrowTexture.filterMode = FilterMode.Bilinear;
+
+            _arrowRenderer = _selectionArrow.AddComponent<SpriteRenderer>();
+            _arrowRenderer.sprite = Sprite.Create(
+                _arrowTexture,
+                new Rect(0, 0, size, size),
+                new Vector2(0.5f, 0f),
+                100f);
+            _arrowRenderer.color = new Color(1f, 0.85f, 0.2f);
+            _arrowRenderer.sortingOrder = 95;
+            _selectionArrow.transform.localScale = new Vector3(0.5f, 0.5f, 1f);
+            _selectionArrow.SetActive(false);
+        }
+
+        void UpdateArrowVisibility()
+        {
+            EnsureArrow();
+            bool visible = _localPlayer != null
+                && _localPlayer.HasSelectedItem.Value
+                && _confirmedSlotIndex >= 0
+                && _localViews != null
+                && _confirmedSlotIndex < _localViews.Length
+                && _localViews[_confirmedSlotIndex] != null
+                && TurnManager.Instance != null
+                && TurnManager.Instance.CurrentPhase.Value == TurnPhase.PrepPhase;
+
+            _selectionArrow.SetActive(visible);
         }
 
         void UpdateBannedOverlays()

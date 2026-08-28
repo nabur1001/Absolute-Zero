@@ -28,9 +28,13 @@ namespace AbsoluteZero.Core.Combat
         public static event System.Action OnTempOverridesClear;
         public static event System.Action<float, float> OnTempTargetsOverride;
         public static event System.Action<int, float> OnPlayerTempOverride;
+        public static event System.Action<int> OnAttackerChanged;
 
         uint _activeSequence;
         bool _sequenceCompleted;
+
+        Transform _hugMovedTransform;
+        Vector3 _hugSavedPos;
 
         readonly Dictionary<GameObject, ObjectPool<GameObject>> _particlePools = new();
 
@@ -39,24 +43,40 @@ namespace AbsoluteZero.Core.Combat
             if (_sequenceCompleted) return;
             _sequenceCompleted = true;
 
-            InventoryPresenter.Instance?.UnlockRebuild();
-            OnTempOverridesClear?.Invoke();
+            if (_hugMovedTransform != null)
+            {
+                _hugMovedTransform.position = _hugSavedPos;
+                _hugMovedTransform = null;
+            }
+
+            try { InventoryPresenter.Instance?.UnlockRebuild(); }
+            catch (System.Exception e) { Debug.LogException(e); }
+
+            try { OnTempOverridesClear?.Invoke(); }
+            catch (System.Exception e) { Debug.LogException(e); }
+
             IsPlaying = false;
+
+            try { OnAttackerChanged?.Invoke(-1); }
+            catch (System.Exception e) { Debug.LogException(e); }
 
             Debug.Log($"[CombatVFX] Presentation complete: seq={_activeSequence}");
 
-            var nm = NetworkManager.Singleton;
-            if (nm != null && nm.IsConnectedClient)
+            try
             {
-                var localPlayer = nm.LocalClient?.PlayerObject?.GetComponent<PlayerState>();
-                localPlayer?.PresentationAckServerRpc(_activeSequence);
+                var nm = NetworkManager.Singleton;
+                if (nm != null && nm.IsConnectedClient)
+                {
+                    var localPlayer = nm.LocalClient?.PlayerObject?.GetComponent<PlayerState>();
+                    localPlayer?.PresentationAckServerRpc(_activeSequence);
+                }
             }
+            catch (System.Exception e) { Debug.LogException(e); }
         }
 
         static readonly WaitForSeconds _waitIntro = new(0.5f);
         static readonly WaitForSeconds _waitBriefPause = new(0.3f);
         static readonly WaitForSeconds _waitDamageReact = new(0.7f);
-        static readonly WaitForSeconds _waitDeathSequence = new(2.5f);
         static readonly WaitForSeconds _waitFeedHalf = new(0.5f);
         static readonly WaitForSeconds _waitBuldak07 = new(0.7f);
         static readonly WaitForSeconds _waitBuldak02 = new(0.2f);
@@ -64,6 +84,8 @@ namespace AbsoluteZero.Core.Combat
         static readonly WaitForSeconds _waitHug08 = new(0.8f);
         static readonly WaitForSeconds _waitCatWake = new(0.4f);
         static readonly WaitForSeconds _waitCatReady = new(0.3f);
+
+        const float MIN_ACTION_DURATION = 3f;
 
         void Awake()
         {
@@ -96,8 +118,12 @@ namespace AbsoluteZero.Core.Combat
             _activeSequence = result.ResultSequence;
             _sequenceCompleted = false;
             IsPlaying = true;
-            InventoryPresenter.Instance?.LockRebuild();
-            OnTempTargetsOverride?.Invoke(result.P1TempBeforeCombat, result.P2TempBeforeCombat);
+
+            try { InventoryPresenter.Instance?.LockRebuild(); }
+            catch (System.Exception e) { Debug.LogException(e); }
+
+            try { OnTempTargetsOverride?.Invoke(result.P1TempBeforeCombat, result.P2TempBeforeCombat); }
+            catch (System.Exception e) { Debug.LogException(e); }
 
             try
             {
@@ -117,6 +143,7 @@ namespace AbsoluteZero.Core.Combat
 
                 LogAttackTimingSummary(firstIdx, firstItemId, secondIdx, secondItemId, deadIdx);
 
+                float seqStart = Time.time;
                 yield return _waitIntro;
 
                 Debug.Log($"[CombatVFX] Sequence seq={_activeSequence}: first=P{firstIdx}(item={firstItemId}), second=P{secondIdx}(item={secondItemId}), deadIdx={deadIdx}");
@@ -129,6 +156,7 @@ namespace AbsoluteZero.Core.Combat
                 if (firstItemId >= 0)
                 {
                     Debug.Log($"[CombatVFX] Playing FIRST item sequence: P{firstIdx} item={firstItemId}, targetDefending={secondIsDefending}");
+                    OnAttackerChanged?.Invoke(firstIdx);
                     yield return StartCoroutine(PlayItemSequence(firstIdx, firstItemId, nm, secondIsDefending, result));
                 }
 
@@ -136,8 +164,8 @@ namespace AbsoluteZero.Core.Combat
                 {
                     Debug.Log($"[CombatVFX] First action killed P{deadIdx} — playing death sequence");
                     var deadVisual = GetPlayerVisual(deadIdx, nm);
-                    if (deadVisual != null) deadVisual.PlayDeathSequence();
-                    yield return _waitDeathSequence;
+                    if (deadVisual != null)
+                        yield return deadVisual.PlayDeathSequenceAndWait(result.EndsMatch);
                     yield break;
                 }
 
@@ -147,6 +175,7 @@ namespace AbsoluteZero.Core.Combat
                 if (secondItemId >= 0)
                 {
                     Debug.Log($"[CombatVFX] Playing SECOND item sequence: P{secondIdx} item={secondItemId}, targetDefending={firstIsDefending}");
+                    OnAttackerChanged?.Invoke(secondIdx);
                     yield return StartCoroutine(PlayItemSequence(secondIdx, secondItemId, nm, firstIsDefending, result));
                 }
 
@@ -154,8 +183,18 @@ namespace AbsoluteZero.Core.Combat
                 {
                     Debug.Log($"[CombatVFX] Second action killed P{deadIdx} — playing death sequence");
                     var deadVisual = GetPlayerVisual(deadIdx, nm);
-                    if (deadVisual != null) deadVisual.PlayDeathSequence();
-                    yield return _waitDeathSequence;
+                    if (deadVisual != null)
+                        yield return deadVisual.PlayDeathSequenceAndWait(result.EndsMatch);
+                }
+                else
+                {
+                    float elapsed = Time.time - seqStart;
+                    float pad = MIN_ACTION_DURATION - elapsed;
+                    if (pad > 0f)
+                    {
+                        Debug.Log($"[CombatVFX] Padding {pad:F2}s to meet {MIN_ACTION_DURATION}s minimum");
+                        yield return new WaitForSeconds(pad);
+                    }
                 }
             }
             finally
@@ -241,7 +280,12 @@ namespace AbsoluteZero.Core.Combat
                                 if (!isLocalUser)
                                 {
                                     PlayHitAt(GetPlayerWorldPos(targetIdx));
-                                    if (h == 0) ScreenVFXManager.Instance.PlayHitVFX();
+                                    if (h == 0)
+                                    {
+                                        ScreenVFXManager.Instance.PlayHitVFX();
+                                        CameraShake.Instance?.Shake(0.15f, 0.1f);
+                                        PlayIceBreakAt(GetPlayerWorldPos(targetIdx));
+                                    }
                                 }
                                 GameAudioManager.Instance?.PlayDamaged();
                             }
@@ -308,6 +352,8 @@ namespace AbsoluteZero.Core.Combat
                         {
                             PlayHitAt(GetPlayerWorldPos(targetIdx));
                             ScreenVFXManager.Instance.PlayHitVFX();
+                            CameraShake.Instance?.Shake(0.15f, 0.1f);
+                            PlayIceBreakAt(GetPlayerWorldPos(targetIdx));
                         }
                         GameAudioManager.Instance?.PlayDamaged();
                     }
@@ -325,7 +371,7 @@ namespace AbsoluteZero.Core.Combat
                     targetVisual.ReturnToIdle();
             }
 
-            bool isTargetOpponent = userIdx != (int)nm.LocalClientId;
+            bool isTargetOpponent = isLocalUser;
             string itemName = itemData.ItemName;
 
             if ((itemName == "Samgyetang" || itemName == "Ice Cream" || itemName == "Iced Americano")
@@ -799,6 +845,8 @@ namespace AbsoluteZero.Core.Combat
             {
                 var userTf = userVisual.GetVisualRoot() ?? userVisual.transform;
                 var userStartPos = userTf.position;
+                _hugMovedTransform = userTf;
+                _hugSavedPos = userStartPos;
                 var targetPos = GetPlayerWorldPos(targetIdx);
 
                 userVisual.PlayCombatAnimation("jump");
@@ -824,6 +872,7 @@ namespace AbsoluteZero.Core.Combat
                     yield return null;
                 }
                 userTf.position = userStartPos;
+                _hugMovedTransform = null;
                 userVisual.ReturnToIdle();
             }
         }

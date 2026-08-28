@@ -3873,8 +3873,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 874717425}
-  - component: {fileID: 874717424}
   - component: {fileID: 874717426}
+  - component: {fileID: 874717427}
+  - component: {fileID: 874717428}
   m_Layer: 0
   m_Name: GameUI
   m_TagString: Untagged
@@ -3882,27 +3883,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &874717424
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 874717423}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b6a0f4590dbe1854dbb534687b23ba89, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.UI.Game.AZGameUI
-  playerFanScale: 0.54
-  enemyFanScale: 0.95
-  fanLiftBase: 1.4
-  fanHeadCenter: {x: -0.16, y: 0.6, z: 0}
-  fanBladeScale: 1.2
-  fanBladeSquashX: 0.82
-  fanGrilleScale: {x: 0.92, y: 1.02}
-  fanBladesZ: -0.015
-  fanGrilleZ: -0.03
 --- !u!4 &874717425
 Transform:
   m_ObjectHideFlags: 0
@@ -3930,6 +3910,39 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b11bcb4cc97abbd48bc389463a3133cf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.Core.Common.HoverRaycaster
+--- !u!114 &874717427
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 874717423}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa4d28f4bcba3d9478159eb958cd4f23, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: AbsoluteZero.UI::AbsoluteZero.UI.Game.GameUIRoot
+--- !u!114 &874717428
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 874717423}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b9a223c8cee00bb49b943210983aea79, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: AbsoluteZero.UI::AbsoluteZero.UI.Game.FanSpawner
+  playerFanScale: 0.54
+  enemyFanScale: 0.95
+  fanLiftBase: 1.4
+  fanHeadCenter: {x: -0.16, y: 0.6, z: 0}
+  fanBladeScale: 1.2
+  fanBladeSquashX: 0.82
+  fanGrilleScale: {x: 0.92, y: 1.02}
+  fanBladesZ: -0.015
+  fanGrilleZ: -0.03
 --- !u!1 &888100001
 GameObject:
   m_ObjectHideFlags: 0
@@ -7020,6 +7033,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.Core.Turn.TurnManager
   ShowTopMostFoldoutHeaderGroup: 1
   prepDuration: 20
+  presentationTimeoutSeconds: 10
 --- !u!114 &1492566796
 MonoBehaviour:
   m_ObjectHideFlags: 0

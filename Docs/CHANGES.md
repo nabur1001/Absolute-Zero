@@ -5,6 +5,16 @@
 
 ---
 
+[2026-08-27] [Claude] [Feature] — PLAN_022 Phase C+D 구현. 9-4 CinematicOverlay (fade/text-rise 라운드/매치 종료 연출, RoundResultPresenter 코루틴 재작성), 9-7 Progress HUD (player name boxes + crown ♛ + attacker box highlight via OnAttackerChanged pipeline), 9-8 Selection Arrow (procedural triangle + bounce animation + phase auto-hide). PLAN_022 전 Phase 구현 완료 — 런타임 플레이테스트 대기.
+
+[2026-08-27] [Claude] [Feature] — PLAN_022 Phase A + Cross-cutting 구현. 1v1 개선: PrepPhase 1초 면역 (skipFirstFanTick), 3초 최소 연출 envelope (MIN_ACTION_DURATION + padding), 사망 시퀀스 endsMatch 분기 (PlayDeathSequenceAndWait, PlayBreakParticles(heavy)), CombatResultData.EndsMatch NV, MatchManager.WouldEndMatch(), FirstReadySeat NV lifecycle (TurnManager→GameDataBridge→MatchSnapshot), barrier timeout floor 15f, HandleRoundEnd 6s, REBUILD_LOCK_TIMEOUT 15s. 8파일 수정.
+
+[2026-08-27] [Claude] [Design] — GAME_DESIGN.md 대규모 업데이트. 3 게임 모드 (1v1/Multi 3~4/Solo+Bot), 1v1 개선사항 (1s 면역, 3s 통합 연출, 방어 우선 실행), Multi 전용 시스템 (5킬 승리, 밸런스 패치 8항목, 라운드 플로우, 드래그-타겟), Ghost System (Frost Strike + Chill Aura, 킬 스코어 인정), Solo/Bot AI (BT, 2~3 난이도), Customization (5파트 hybrid, Among Us 참조), Lobby/Scene 구조, Q20 해소 (전체 초기화, 킬스코어만 누적).
+
+[2026-08-27] [Claude] [Bugfix] — KI-001 EnemyPlayer 렌더러 미표시 수정. AZPlayerVisual.OnNetworkSpawn remote 분기에서 GameObject.Find("EnemyPlayer") 실패 시 즉시 return하던 로직을 TryBindEnemyVisual() + RetryBindEnemyVisual() 코루틴 재시도 패턴으로 변경 (3초 timeout, 매 프레임). 원인: 클라이언트 씬 로드 완료 전 OnNetworkSpawn 실행 시 Find null 반환. ACTIVE_CONTEXT.md 260줄→80줄 정리.
+
+[2026-08-26] [Claude] [Architecture] — PLAN_020 UI Pipeline Refactoring (Phase 0~7). AZGameUI 1332줄 God Class 완전 분해: GameUIRoot (composition root) + GameDataBridge (NV aggregation, LateUpdate batching, 0.15s settle) + GameUIManager (presenter mediator) + TemperaturePresenter + MatchHudPresenter + RoundResultPresenter + OpponentBarPresenter + FanSpawner + GameHudBuilder/GameHudRefs. seat-keyed Dictionary 온도 override, ILocalPlayerCommands 커맨드 분리, bridge 이벤트 파이프라인. Phase 0 critical fixes: RPC InvokePermission, BarrierState enum, ClientId-as-seat 제거, DetermineDeathWinner int?. AZGameUI.cs 삭제. Core→UI asmdef 단방향 보존. 0 compilation errors.
+
 [2026-08-20] [Claude] [Documentation] — SYSTEM_DESIGN.md 전면 재작성. PLAN_018 Phase 1~7 아키텍처 마이그레이션 반영. 17개 섹션, 94개 파일 인덱스. 신규 시스템 추가: PlayerIdentity/Registry, PresentationBarrier, Gateway/Coordinator, AppBootstrapper, ItemEffectApplicator pipeline, ObjectPool, asmdef 분리, static event 디커플링.
 
 [2026-08-20] [Claude] [Architecture] — PLAN_018 Phase 7 asmdef + Dependency Decoupling. Core→UI 역참조 3건 제거: CombatVFXManager→AZGameUI (3 static events), SessionManager→LoadingScreenManager (2 static events), PlayerState→EmoteBubble (1 static event). AbsoluteZero.Core.asmdef + AbsoluteZero.UI.asmdef 생성 — UI→Core 단방향 참조만 허용, 컴파일러 강제. RULE-018/019 안전수칙 추가. 0 compilation errors.
