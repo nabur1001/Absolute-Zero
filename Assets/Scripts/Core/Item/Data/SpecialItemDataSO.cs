@@ -11,6 +11,9 @@ namespace AbsoluteZero.Core.Item.Data
         public bool TargetsSelf;
         public int DelayTurns;
 
+        public override TargetMode GetTargetMode()
+            => TargetsSelf ? TargetMode.Self : TargetMode.SingleTarget;
+
         public override bool CanUse(ItemContext ctx)
         {
             if (!base.CanUse(ctx)) return false;

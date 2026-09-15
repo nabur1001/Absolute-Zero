@@ -10,6 +10,8 @@ namespace AbsoluteZero.Core.Item.Data
         public float DelayedTempDelta;
         public int DelayTurns = 1;
 
+        public override TargetMode GetTargetMode() => TargetMode.Self;
+
         public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
             Debug.Log($"[COMBAT] BuffItem '{ItemName}': P{ctx.UserIndex} self-buff, immediate={ImmediateTempDelta}, delayed={DelayedTempDelta} in {DelayTurns}t");

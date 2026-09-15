@@ -44,6 +44,11 @@ namespace AbsoluteZero.UI.Game.Bridge
 
         public bool TrySelectItem(byte slotIndex)
         {
+            return TrySelectItemWithTarget(slotIndex, Core.Player.ActionIntent.NoTarget);
+        }
+
+        public bool TrySelectItemWithTarget(byte slotIndex, byte targetSeat)
+        {
             if (_localPlayer == null)
             {
                 Debug.LogWarning("[CommandAdapter] TrySelectItem: no local player bound");
@@ -54,7 +59,7 @@ namespace AbsoluteZero.UI.Game.Bridge
             if (MiniGameHub.IsRunning) return false;
             if (_localPlayer.HasSelectedItem.Value) return false;
 
-            _localPlayer.SelectItemServerRpc(slotIndex);
+            _localPlayer.SelectItemServerRpc(slotIndex, targetSeat);
             return true;
         }
 
@@ -66,6 +71,17 @@ namespace AbsoluteZero.UI.Game.Bridge
                 return;
             }
             _localPlayer.PressReadyServerRpc();
+        }
+
+        public void UseGhostSkill(byte skillIndex, byte targetSeat)
+        {
+            var tm = Object.FindAnyObjectByType<Core.Turn.TurnManager>();
+            if (tm == null)
+            {
+                Debug.LogWarning("[CommandAdapter] UseGhostSkill: TurnManager not found");
+                return;
+            }
+            tm.UseGhostSkillRpc(skillIndex, targetSeat);
         }
 
         public async Task LeaveMatchAsync()
@@ -85,6 +101,17 @@ namespace AbsoluteZero.UI.Game.Bridge
             {
                 Debug.LogException(e);
             }
+        }
+
+        public void SubmitRematchDecision(bool accept, uint voteEpoch)
+        {
+            var mcr = MatchCompositionRoot.Instance;
+            if (mcr == null || mcr.MatchManager == null)
+            {
+                Debug.LogWarning("[CommandAdapter] SubmitRematchDecision: MatchManager not available");
+                return;
+            }
+            mcr.MatchManager.SubmitRematchDecisionRpc(accept, voteEpoch);
         }
     }
 }

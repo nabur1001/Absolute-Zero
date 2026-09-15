@@ -32,5 +32,5 @@ MonoBehaviour:
   MiniGameTimeLimit: 10
   MiniGameGoal: 25
   ImmediateTempDelta: 0
-  DelayedTempDelta: 17
+  DelayedTempDelta: 20
   DelayTurns: 1

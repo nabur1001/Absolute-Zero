@@ -13,16 +13,16 @@ namespace AbsoluteZero.UI.Game.Build
         const float WORLD_CANVAS_SCALE = 0.005f;
         const float OPP_BAR_SCALE = 0.007f;
 
-        public static GameHudRefs Build()
+        public static GameHudRefs Build(int seatCount = 2)
         {
             var r = new GameHudRefs();
-            BuildOverlayUI(r);
+            BuildOverlayUI(r, seatCount);
             BuildOppBarWorldUI(r);
             BuildReadyWorldUI(r);
             return r;
         }
 
-        static void BuildOverlayUI(GameHudRefs r)
+        static void BuildOverlayUI(GameHudRefs r, int seatCount)
         {
             var canvasGO = new GameObject("OverlayCanvas");
             r.OverlayCanvas = canvasGO.AddComponent<Canvas>();
@@ -45,7 +45,7 @@ namespace AbsoluteZero.UI.Game.Build
                 new Vector2(0, -30), new Vector2(400, 50), "WAITING", 28);
             AnchorTopCenter(r.PhaseText.GetComponent<RectTransform>());
 
-            BuildProgressHud(r, root);
+            BuildProgressHud(r, root, seatCount);
 
             r.StatusText = CreateText(root, "StatusText",
                 new Vector2(0, 30), new Vector2(600, 35), "Waiting for players...", 20);
@@ -54,6 +54,7 @@ namespace AbsoluteZero.UI.Game.Build
 
             BuildEnvironmentPanel(r, root);
             BuildCinematicOverlay(r, root);
+            BuildGhostSkillPanel(r, root);
         }
 
         static void BuildMyHpBar(GameHudRefs r, Transform root)
@@ -263,9 +264,26 @@ namespace AbsoluteZero.UI.Game.Build
 
         static void BuildOppBarWorldUI(GameHudRefs r)
         {
-            var canvasGO = new GameObject("EnemyCanvas");
-            r.OppBarCanvas = canvasGO.AddComponent<Canvas>();
-            r.OppBarCanvas.renderMode = RenderMode.WorldSpace;
+            const int MAX_OPP_BARS = 3;
+            for (int i = 0; i < MAX_OPP_BARS; i++)
+            {
+                var entry = BuildSingleOppBar(i);
+                r.OppBars.Add(entry);
+                entry.Canvas.gameObject.SetActive(false);
+            }
+
+            var first = r.OppBars[0];
+            r.OppBarCanvas = first.Canvas;
+            r.OppTempText = first.TempText;
+            r.OppHpSlider = first.HpSlider;
+            r.OppHpFillImage = first.HpFillImage;
+        }
+
+        static OppBarEntry BuildSingleOppBar(int index)
+        {
+            var canvasGO = new GameObject($"EnemyCanvas_{index}");
+            var canvas = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
 
             var rt = canvasGO.GetComponent<RectTransform>();
             rt.sizeDelta = new Vector2(100, 100);
@@ -280,12 +298,12 @@ namespace AbsoluteZero.UI.Game.Build
             hpRect.anchoredPosition = Vector2.zero;
             hpRect.sizeDelta = new Vector2(600, 100);
 
-            r.OppHpSlider = hpBar.AddComponent<Slider>();
-            r.OppHpSlider.minValue = 0f;
-            r.OppHpSlider.maxValue = 1f;
-            r.OppHpSlider.value = 1f;
-            r.OppHpSlider.interactable = false;
-            r.OppHpSlider.direction = Slider.Direction.LeftToRight;
+            var slider = hpBar.AddComponent<Slider>();
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+            slider.value = 1f;
+            slider.interactable = false;
+            slider.direction = Slider.Direction.LeftToRight;
 
             var bgGO = new GameObject("Background");
             bgGO.transform.SetParent(hpBar.transform, false);
@@ -318,9 +336,8 @@ namespace AbsoluteZero.UI.Game.Build
             fillImg.type = Image.Type.Filled;
             fillImg.fillMethod = Image.FillMethod.Horizontal;
             fillImg.color = INIT_HP_COLOR;
-            r.OppHpFillImage = fillImg;
 
-            r.OppHpSlider.fillRect = fillRect;
+            slider.fillRect = fillRect;
 
             var outlineGO = new GameObject("Outline");
             outlineGO.transform.SetParent(hpBar.transform, false);
@@ -344,8 +361,16 @@ namespace AbsoluteZero.UI.Game.Build
 
             BuildOppDividerLines(hpBar.transform);
 
-            r.OppTempText = CreateText(canvasGO.transform, "OppTemp",
+            var tempText = CreateText(canvasGO.transform, "OppTemp",
                 new Vector2(0, -70), new Vector2(360, 32), "37°", 26);
+
+            return new OppBarEntry
+            {
+                Canvas = canvas,
+                TempText = tempText,
+                HpSlider = slider,
+                HpFillImage = fillImg
+            };
         }
 
         static void BuildOppDividerLines(Transform parent)
@@ -414,32 +439,49 @@ namespace AbsoluteZero.UI.Game.Build
             r.ReadyCanvas.gameObject.SetActive(false);
         }
 
-        static void BuildProgressHud(GameHudRefs r, Transform root)
+        static readonly float[][] NameBoxXPositions =
         {
+            new[] { -145f, 145f },
+            new[] { -180f, 0f, 180f },
+            new[] { -210f, -70f, 70f, 210f }
+        };
+
+        static void BuildProgressHud(GameHudRefs r, Transform root, int seatCount)
+        {
+            seatCount = Mathf.Clamp(seatCount, 2, 4);
             var container = new GameObject("ProgressHud");
             container.transform.SetParent(root, false);
             var cRect = container.AddComponent<RectTransform>();
             cRect.anchoredPosition = new Vector2(0, -75);
-            cRect.sizeDelta = new Vector2(400, 30);
+            float containerWidth = seatCount <= 2 ? 400 : seatCount == 3 ? 500 : 560;
+            cRect.sizeDelta = new Vector2(containerWidth, 30);
             AnchorTopCenter(cRect);
 
             var boxColor = new Color(0.15f, 0.15f, 0.2f, 0.8f);
+            int layoutIdx = Mathf.Clamp(seatCount - 2, 0, NameBoxXPositions.Length - 1);
+            var xPositions = NameBoxXPositions[layoutIdx];
 
-            r.P1NameBox = CreatePanel(container.transform, "P1Box",
-                new Vector2(-145, 0), new Vector2(130, 28), boxColor);
-            r.P1NameText = CreateText(r.P1NameBox.transform, "P1Name",
-                Vector2.zero, new Vector2(120, 24), "Player 1", 14);
-            r.P1NameText.alignment = TextAlignmentOptions.Center;
+            r.NameBoxes = new Image[seatCount];
+            r.NameTexts = new TextMeshProUGUI[seatCount];
+
+            for (int i = 0; i < seatCount; i++)
+            {
+                float xPos = i < xPositions.Length ? xPositions[i] : xPositions[xPositions.Length - 1];
+                r.NameBoxes[i] = CreatePanel(container.transform, $"P{i}Box",
+                    new Vector2(xPos, 0), new Vector2(130, 28), boxColor);
+                r.NameTexts[i] = CreateText(r.NameBoxes[i].transform, $"P{i}Name",
+                    Vector2.zero, new Vector2(120, 24), $"Player {i + 1}", 14);
+                r.NameTexts[i].alignment = TextAlignmentOptions.Center;
+            }
+
+            r.P1NameBox = r.NameBoxes[0];
+            r.P2NameBox = r.NameBoxes.Length > 1 ? r.NameBoxes[1] : null;
+            r.P1NameText = r.NameTexts[0];
+            r.P2NameText = r.NameTexts.Length > 1 ? r.NameTexts[1] : null;
 
             r.ScoreText = CreateText(container.transform, "ScoreText",
                 Vector2.zero, new Vector2(80, 30), "0 : 0", 20);
             r.ScoreText.color = new Color(0.9f, 0.9f, 0.6f);
-
-            r.P2NameBox = CreatePanel(container.transform, "P2Box",
-                new Vector2(145, 0), new Vector2(130, 28), boxColor);
-            r.P2NameText = CreateText(r.P2NameBox.transform, "P2Name",
-                Vector2.zero, new Vector2(120, 24), "Player 2", 14);
-            r.P2NameText.alignment = TextAlignmentOptions.Center;
 
             r.CrownText = CreateText(container.transform, "Crown",
                 new Vector2(-80, 0), new Vector2(24, 24), "♛", 18);
@@ -466,11 +508,57 @@ namespace AbsoluteZero.UI.Game.Build
             r.CinematicText.color = new Color(1f, 1f, 1f, 0f);
 
             r.LobbyButton = CreateButton(overlayGO.transform, "LobbyBtn",
-                new Vector2(0, -60), new Vector2(200, 45), "BACK TO LOBBY",
+                new Vector2(110, -60), new Vector2(200, 45), "로비로",
                 new Color(0.5f, 0.3f, 0.3f));
             r.LobbyButton.gameObject.SetActive(false);
 
+            r.RematchButton = CreateButton(overlayGO.transform, "RematchBtn",
+                new Vector2(-110, -60), new Vector2(200, 45), "재대결",
+                new Color(0.3f, 0.5f, 0.3f));
+            r.RematchButton.gameObject.SetActive(false);
+
+            r.RematchStatusText = CreateText(overlayGO.transform, "RematchStatus",
+                new Vector2(0, -110), new Vector2(400, 30), "", 18);
+            r.RematchStatusText.gameObject.SetActive(false);
+
             overlayGO.SetActive(false);
+        }
+
+        static void BuildGhostSkillPanel(GameHudRefs r, Transform root)
+        {
+            var panel = new GameObject("GhostSkillPanel");
+            panel.transform.SetParent(root, false);
+            var panelRect = panel.AddComponent<RectTransform>();
+            panelRect.anchoredPosition = new Vector2(0, 180);
+            panelRect.sizeDelta = new Vector2(440, 140);
+            AnchorBottomCenter(panelRect);
+
+            CreatePanel(panel.transform, "GhostBg",
+                Vector2.zero, new Vector2(440, 140),
+                new Color(0.1f, 0.05f, 0.15f, 0.85f));
+
+            r.GhostStatusText = CreateText(panel.transform, "GhostStatus",
+                new Vector2(0, 45), new Vector2(400, 30), "Ghost Mode — select a skill", 16);
+            r.GhostStatusText.color = new Color(0.7f, 0.8f, 1f);
+
+            r.FrostStrikeButton = CreateButton(panel.transform, "FrostStrikeBtn",
+                new Vector2(-110, -15), new Vector2(190, 50), "Frost Strike",
+                new Color(0.2f, 0.4f, 0.7f));
+
+            r.FrostStrikeCooldownText = CreateText(panel.transform, "FrostCD",
+                new Vector2(-110, -50), new Vector2(190, 20), "", 14);
+            r.FrostStrikeCooldownText.color = new Color(0.6f, 0.7f, 1f);
+
+            r.ChillAuraButton = CreateButton(panel.transform, "ChillAuraBtn",
+                new Vector2(110, -15), new Vector2(190, 50), "Chill Aura",
+                new Color(0.3f, 0.2f, 0.6f));
+
+            r.ChillAuraCooldownText = CreateText(panel.transform, "ChillCD",
+                new Vector2(110, -50), new Vector2(190, 20), "", 14);
+            r.ChillAuraCooldownText.color = new Color(0.6f, 0.7f, 1f);
+
+            r.GhostSkillPanel = panel;
+            panel.SetActive(false);
         }
 
         static void BuildEnvironmentPanel(GameHudRefs r, Transform root)

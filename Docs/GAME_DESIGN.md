@@ -32,11 +32,11 @@ Starting Temp: 37°  |  Fan: -1°/sec  |  Prep Time: 20s  |  Defeat: 0°  |  Rec
 - No post-death attacks
 
 **Multi (3~4인 전용):**
-- Kill-based scoring (5 kills to win, co-victory possible)
+- Kill-based scoring (5 kills to win, co-victory possible within one committed action/effect group)
 - Death → Ghost state (debuff trolling, ghost kills count as score)
 - Round ends when ≤1 player alive (or all dead simultaneously)
 - Round reset: all revive at 37°, items/thresholds fully reset, kill score persists
-- Drag-to-target item selection
+- Click-to-target item selection (click enemy character to designate target)
 - Separate balance: Windbreaker 1-use, max 4 random items, threshold grants all 1 each
 - Initial random item grant at game start (2 items)
 
@@ -71,8 +71,9 @@ Fan OFF: recovery        First kill = win          → Next turn
 ### Attack Phase
 - Execute in **Ready-press order** (who pressed first goes first)
 - **Defense exception**: always activates regardless of order
-- If first action kills (0°), **second action is cancelled** — round ends immediately (Q10 confirmed)
-- Simultaneous Ready → **lower temperature acts first** (comeback opportunity) (Q14 confirmed)
+- If first action kills (0°), **second action is cancelled** — round ends immediately
+- Simultaneous Ready → **lower temperature acts first** (comeback opportunity)
+- **Multi: mid-turn death** — if a player dies during action resolution, their already-selected action is **cancelled** (not executed)
 
 ---
 
@@ -170,7 +171,7 @@ Both clients see mirrored view (my items = bottom, opponent = top)
 | Item | Cat | Persistence | Value | Effect |
 |------|-----|-------------|-------|--------|
 | Fan (부채) | ATK | Permanent | 3° | Opponent temp −3° |
-| Windbreaker (바람막이) | DEF | Permanent | 4° | Partial block: absorbs up to 4° of temp attack damage |
+| Windbreaker (바람막이) | DEF | Permanent | — | Blocks tool (도구) attacks. Cannot block debuff/sabotage attacks |
 | Warm Tea (따뜻한 차) | REC | Consumable | 7° | Self temp +7° |
 | Cat (고양이) | SAB | Consumable | — | Reroll ALL opponent random items |
 
@@ -181,23 +182,24 @@ Both clients see mirrored view (my items = bottom, opponent = top)
 | Hand Fan (손풍기) | ATK | 4° | 12% | — |
 | Ice Cream (아이스크림) | ATK | 5° | 10% | — |
 | Iced Americano (아.아) | ATK | 5° | 10% | — |
-| Water Gun (물총) | ATK | 7° | 6% | 5s: hit 3 moving targets |
-| Hug T-shirt (안아줘요 티셔츠) | ATK | =my temp | 4% | 10s: hug approaching character |
+| Water Gun (물총) | ATK | 8° | 6% | 5s: hit 3 moving targets |
+| Hug T-shirt (안아줘요 티셔츠) | ATK | opp temp = my temp | 4% | 10s: hug approaching character |
 | Hot Americano (뜨.아) | REC | 5° | 10% | — |
-| Smartphone (스마트폰) | REC | 3→5→7° | 6% | 5s: pattern unlock |
-| Hot Pack (핫팩) | REC | 10° | 4% | **TBD: 아이템표 10s/30tap vs 미니게임표 7s/15tap** |
+| Smartphone (스마트폰) | REC | 4→6→7° | 5% | 5s: pattern unlock |
+| Hot Pack (핫팩) | REC | 12° | 4% | 7s: tap 15 times to heat |
 | Mask (마스크) | DEF | 100% food block | 8% | — |
-| Samgyetang (삼계탕) | DBF | opp +3 now / opp −7 next | 8% | — |
+| Samgyetang (삼계탕) | DBF | opp +3 now / opp −7 next | 7% | — |
 | Soda (탄산음료) | BUF | self −5 now / self +15 next | 6% | — |
-| Buldak Noodles (불닭볶음면) | BUF | +17° | 2% | 10s: tap to boil water |
+| Buldak Noodles (불닭볶음면) | BUF | +20° next turn | 2% | 10s: tap to boil water |
 | Screwdriver (십자드라이버) | SPC | 2×fan | 4% | 7s: tighten 3 screws |
 | Tarot Card (속마음 타로카드) | SPC | — | 2% | — |
 | Claw Machine (집게손) | SAB | — | 4% | 7s: timing claw grab |
 | Blue Tape (청테이프) | SAB | — | 4% | 5s: timing tape cut |
 | Red Card (레드카드) | SAB | — | 2% | 5s: tap red card among yellows |
 
-> **Drop rates sum to 102%** — treated as **weighted pool** (e.g. 손풍기 12/102 ≈ 11.8%). Duplicate drops allowed, but **max 3 copies** of same item.
+> **Drop rates are weighted pool** (e.g. 손풍기 12/total). Duplicate drops allowed, but **max 3 copies** of same item.
 > **9 items require mini-games**, 8 do not.
+> **Mask food items (음식 태그):** 따뜻한 차, 삼계탕, 아이스크림, 아.아, 뜨.아, 불닭볶음면, 탄산음료 (7종)
 
 ```
 Category key: ATK=Attack  DEF=Defense  REC=Recovery
@@ -230,7 +232,7 @@ Item click → Mini-game starts (PrepPhase timer continues)
 | Screwdriver (십자드라이버) | 7s | Circular drag | 3 screws appear. Drag clockwise (3 rotations each) to tighten | All 3 screws tightened in time | Time out or incomplete |
 | Claw Machine (집게손) | 7s | Timing tap | Claw moves left-right above target item. Tap when aligned | Claw grabs item at correct timing | Missed timing or time out |
 | Water Gun (물총) | 5s | Tap | 3 targets move irregularly. Tap to shoot | Hit all 3 targets in time | Missed targets or time out |
-| Hot Pack (핫팩) | **TBD (7s or 10s)** | Rapid tap | Hot Pack turns red as tapped, gauge rises. **TBD: 아이템표 10s/30tap vs 미니게임표 7s/15tap** | Reach tap count in time | Count not reached |
+| Hot Pack (핫팩) | 7s | Rapid tap | Hot Pack turns red as tapped, gauge rises. 15 taps to complete | Reach 15 taps in 7s | Count not reached |
 | Blue Tape (청테이프) | 5s | Timing tap | Tape stretches with timing bar. Tap in green zone | Tap in green zone | Tap outside green or time out |
 | Smartphone (스마트폰) | 5s | Drag | 3×3 dot grid, trace shown pattern (ㄱ, ㄴ, Z, etc.) | Pattern matched | Wrong pattern or time out |
 | Buldak Noodles (불닭볶음면) | 10s | Rapid tap | Pot + gauge. Tapping boils water, gauge rises | Gauge reaches 100% | Gauge incomplete |
@@ -426,8 +428,8 @@ Check: opponent 0°? → round end or next turn
 |-----------|--------|
 | Any player reaches 0° | That player enters **Ghost state** — round continues |
 | ≤1 player alive (or all dead) | Round ends → all revive at 37° → next round |
-| First to **5 kills** (cumulative) | Match victory |
-| Multiple players reach 5 kills simultaneously | Co-victory |
+| First to **5 kills** (cumulative) | Match victory immediately after the action/effect group that crosses the threshold; remaining queued actions/effects are canceled |
+| Multiple players reach 5 kills in the same committed action/effect group | Co-victory |
 | Ghost kill via debuff | Counts toward ghost player's kill score |
 
 ---
@@ -458,6 +460,26 @@ All mutations server-side: damage, healing, time, win/loss, item use, buff/debuf
 
 > Completely separate from 1v1. Different scene, different balance, different win condition.
 
+### Scene Layout (GameScene_Multi)
+
+```
+Camera: pos(0,5,-5) rot(22°,0,0) FOV=65 — overhead angle, all 4 seats visible
+
+     SP3(-3,0,6)              SP4(3,0,6)
+          ●                      ●
+
+            ┌────────────────┐
+            │    정자 마루     │
+            └────────────────┘
+
+          ●                      ●
+     SP1(-3,0,0)              SP2(3,0,0)
+```
+
+- 2×2 grid spawn layout (front-left, front-right, back-left, back-right)
+- 3-player matches use SP1~SP3 (SP4 unused)
+- Each seat has `PlayerSeatMarker` + `BoxCollider(trigger)` for click-to-target raycast
+
 ### Balance Differences from 1v1
 
 | Parameter | 1v1 | Multi |
@@ -472,13 +494,15 @@ All mutations server-side: damage, healing, time, win/loss, item use, buff/debuf
 | Tarot Card | Available | **Removed from drop table** |
 | Icebox position | Left-center | **Center** |
 | Death rule | Round ends | Ghost state, round continues |
-| Deathmatch grant | N/A | **2 players left → instant 4 random items** |
+| Deathmatch grant | N/A | **2 players left → keep current items/uses and fill empty random capacity to 4** |
+
+Deathmatch top-up keeps duplicates in separate slots, allows at most three copies of one item, and never stacks uses into an existing copy.
 
 ### Target Selection
 
-- Item use requires **drag-to-target** on the target character
+- Item use requires **click-to-target** — click on the target character to designate
 - Re-clicking a targeted item cancels the selection
-- Reference: Slay the Spire targeting UX
+- Self-targeting items (Recovery, Defense, Buff) auto-target self without click
 
 ### Round Flow (Multi)
 
@@ -486,11 +510,14 @@ All mutations server-side: damage, healing, time, win/loss, item use, buff/debuf
 ROUND START (all at 37°, items reset, threshold reset)
      ↓
 PREP PHASE (20s, 1s immunity)
-  - Select item + drag-to-target
+  - Select item + click-to-target
   - Press Ready → fan off, recovery
      ↓
-ATTACK PHASE (3s per item, defense first)
+ATTACK PHASE (minimum 3s per actually played item)
   - Execute in Ready-press order
+  - Applicable defense reacts at the incoming attack impact (full block: defense only, partial block: defense + damage)
+  - Check the 5-kill threshold after each committed action/effect group
+  - On a winner: cancel all remaining actions/effects, finish the deciding presentation, then show the result
   - If player reaches 0° → Ghost state (round continues!)
   - Remaining players keep fighting
      ↓
@@ -515,15 +542,26 @@ Player reaches 0°
   ↓
 Freeze animation → ice particle burst → character disappears
   ↓
-Ghost prefab replaces character (semi-transparent, ~0.4 alpha)
+Current placeholder object marks the ghost (final sprite/appearance TBD)
   ↓
 Ghost cannot: use items, press Ready, participate in PrepPhase turn flow
-Ghost can: use debuff skills on surviving players (free-form, outside turn structure)
+Ghost can: use debuff skills on surviving players during PrepPhase (real-time, free-form)
   ↓
-If ghost's debuff causes a kill → ghost gets the kill score
+If ghost's debuff causes a kill → last ghost who applied debuff gets the kill score
   ↓
-Round ends (≤1 alive) → all revive at 37° for next round
+≤1 player alive (or 0) → round ends immediately → all revive at 37°
 ```
+
+### Ghost Rules (Confirmed)
+
+| Rule | Detail |
+|------|--------|
+| **Action timing** | PrepPhase 중 자유 사용 (real-time, no turn structure) |
+| **Target** | Living players only — ghosts cannot target other ghosts |
+| **Debuff limit** | 1 debuff active per target (multiple ghosts → only 1 applies) |
+| **Kill credit** | Last ghost who applied debuff gets the kill score |
+| **Last survivor death** | If ghost debuff kills the last survivor → round ends immediately |
+| **Visual** | TBD — keep the current square placeholder until a dedicated sprite is supplied |
 
 ### Ghost Debuff Skills
 
@@ -531,21 +569,31 @@ Round ends (≤1 alive) → all revive at 37° for next round
 
 | Skill | Effect | Cooldown | Duration |
 |-------|--------|----------|----------|
-| **Frost Strike** | Target temp instantly −3~5° | 1 turn | Instant |
-| **Chill Aura** | Target fan decrease rate ×2, recovery effectiveness ×0.5 | 1 turn | 1 turn (until next PrepPhase end) |
+| **Frost Strike** | Target temp instantly −15° | 3 turns | Instant |
+| **Chill Aura** | Target fan decrease rate ×2, recovery effectiveness ×0.5 | 2 turns | 1 turn (until next PrepPhase end) |
 
 - Target selection: click on surviving player (same as item targeting)
-- Ghost visual: semi-transparent character near the play area (TBD — exact visual/movement)
+- Ghost visual: current square placeholder near the seat (final sprite/appearance and movement TBD)
 - Skill cooldown prevents infinite debuff spam
 
-### TBD — Ghost System
+### Implemented — Ghost System
 
 | Item | Status |
 |------|--------|
-| Exact damage value for Frost Strike | Playtest |
-| Chill Aura stacking with other debuffs | Playtest |
-| Ghost movement/positioning on screen | TBD |
-| Ghost skill UI (buttons? click target?) | TBD |
+| Frost Strike damage | ✅ −15°, CD 3 turns (balance via playtest) |
+| Chill Aura | ✅ fan×2, recovery×0.5, CD 2 turns, 1 turn duration |
+| Debuff stacking | N/A — debuff limit 1 per target (overwrite) |
+| Ghost visual | ⏸ Current square placeholder; final sprite/appearance TBD |
+| Ghost skill UI | ✅ 2 skill buttons + click-to-target + cooldown overlay (`GhostSkillPresenter`) |
+| Ghost kill attribution | ✅ `TryKill(GhostFrost)` — last debuff applier gets kill credit |
+| Cooldown sync | ✅ `GhostCooldownNetData` NetworkList — server-authoritative |
+
+### TBD — Ghost System (플레이테스트 결정)
+
+| Item | Status |
+|------|--------|
+| Ghost movement/positioning on screen | TBD — currently fixed at seat position |
+| Frost Strike balance tuning | Playtest — may adjust from 15° |
 
 ---
 
@@ -564,17 +612,18 @@ When a player dies:
 | Parameter | Value |
 |-----------|-------|
 | Rules | Same as 1v1 (Bo3) |
-| Network | Local host, no Relay |
-| Bot execution | TBD (A: server virtual bot, B: client process) |
+| Network | Separate client process (no Relay, no multiplayer sync) |
+| Bot execution | Solo dedicated client — NOT server virtual player |
 | Difficulty | 2~3 levels |
 | Logic | Separate from network multiplayer logic |
 
 ### Bot AI Requirements
 
 - BT (Behavior Tree) based decision making
-- Must handle: item selection, Ready timing, mini-game participation
-- Difficulty affects: item choice quality, Ready timing optimization, mini-game success rate
-- Existing handover doc: `Docs/BOT_AI_HANDOVER.md` (server-side virtual bot structure)
+- Must handle: item selection, Ready timing
+- **Bot does NOT play mini-games** — skips mini-game, applies brief delay then selects action directly
+- Difficulty affects: item choice quality, Ready timing optimization
+- Existing handover doc: `Docs/BOT_AI_HANDOVER.md`
 
 ---
 
@@ -613,6 +662,11 @@ Lobby screen elements:
 - Equipping a different item in the same part → auto-unequip previous
 - Unlock: currently all available (A), future transition to play-based unlock (B)
 
+### Cosmetic Sync (Multiplayer)
+
+- **Sync timing:** lobby entry — cosmetic data sent when player joins lobby
+- **Solo/Bot play:** no multiplayer cosmetic sync (local only)
+
 ---
 
 ## Scene Structure
@@ -636,19 +690,24 @@ LobbyScene (build 0)
 
 | # | Question | Answer |
 |---|----------|--------|
-| Q4 | **삼계탕 "+3, -7" 효과 방향** | ✅ 즉시 상대 온도 +3° (올림) → 다음 턴 상대 온도 -7° (내림). 둘 다 상대에게 적용 |
-| Q5 | **탄산음료 "-5, +15" 효과 방향** | ✅ 즉시 내 온도 -5° (자해 비용) → 다음 턴 내 온도 +15° (이득). 둘 다 자신에게 적용 |
-| Q11 | **미니게임 판정 권한** | ✅ 클라이언트 판정 + 서버 타임아웃 강제 실패. 상세 아래 참조 |
-| Q12 | **미니게임 실패 시 아이템 소모** | ✅ 아이템 소멸. 실패 시 아이템 파괴되며 다른 아이템 재선택 필요 |
-| Q13 | **공격턴 아이템 사용 연출** | ✅ 전용 애니메이션/이펙트 예정, 아트 확정 후 결정 |
-| Q14 | **선풍기 월드 표시** | ✅ StayItem 위치에 해당 오브젝트 스폰만 하면 됨. 연출은 추후 추가 |
-| Q2 | **따뜻한 차 사용 횟수** | ✅ 1회 (기획서 확인, SO MaxUses=1) |
-| Q3 | **고양이 사용 횟수** | ✅ 1회 (기획서 확인, SO MaxUses=1) |
-| Q7 | **드롭 확률 합계 102%** | ✅ 가중치 풀로 처리 (12/102 ≈ 11.8%). 기획서 최종 확인 |
-| Q18 | **스마트폰 사용 횟수** | ✅ 3회 사용, 회복량 3→5→7° (기획서 확인, SO MaxUses=3, HealPerUse=[3,5,7]) |
-| Q15 | **상대방 아이템 보유 목록** | ✅ EnemyItem 위치에 서버가 내려주는 목록 표시. 소모 시 시각적 제거, 재획득 시 다시 표시. 서버 권위 |
-| Q17 | **환경 시스템** | ✅ 데모에는 미포함, 이후 추가 |
-| Q20 | **라운드 간 리셋 범위** | ✅ 전체 초기화: 전원 37° 부활, 아이템/버프/threshold 지급 이력 모두 리셋. 킬 스코어만 라운드 누적 (다인전) |
+| Q1 | **핫팩 미니게임 수치** | ✅ 7초/15번 연타 확정 |
+| Q2 | **따뜻한 차 사용 횟수** | ✅ 1회 |
+| Q3 | **고양이 사용 횟수** | ✅ 1회 |
+| Q4 | **삼계탕 "+3, -7" 효과 방향** | ✅ 즉시 상대 +3° → 다음 턴 상대 -7°. 둘 다 상대에게 적용 |
+| Q5 | **탄산음료 "-5, +15" 효과 방향** | ✅ 즉시 내 -5° → 다음 턴 내 +15°. 둘 다 자신에게 적용 |
+| Q6 | **마스크 "음식 아이템" 범위** | ✅ 종류 "음식" 아이템 7종: 따뜻한 차, 삼계탕, 아이스크림, 아.아, 뜨.아, 불닭볶음면, 탄산음료 |
+| Q7 | **드롭 확률 합계** | ✅ 가중치 풀 |
+| Q8 | **각 아이템 Main/Sub 구분** | ✅ 아이템표 속성: 기본/영구(부채,바람막이), 기본/소모(따뜻한 차,고양이), 랜덤(나머지 전부) |
+| Q9 | **타로카드 "추가 사용" 타이밍** | ✅ 현재 밴 처리 — 추후 개발 |
+| Q11 | **미니게임 판정 권한** | ✅ 클라이언트 판정 + 서버 타임아웃 강제 실패 |
+| Q12 | **미니게임 실패 시 아이템 소모** | ✅ 아이템 소멸 |
+| Q13 | **공격턴 아이템 사용 연출** | ✅ 전용 애니메이션/이펙트 예정 |
+| Q14 | **선풍기 월드 표시** | ✅ StayItem 위치에 스폰 |
+| Q15 | **상대방 아이템 보유 목록** | ✅ EnemyItem 위치에 서버 기반 표시 |
+| Q17 | **환경 시스템** | ✅ 데모 미포함, 이후 추가 |
+| Q18 | **스마트폰 사용 횟수** | ✅ 3회, 회복량 4→6→7° |
+| Q19 | **안아줘요 티셔츠 역효과** | ✅ 의도된 리스크 — 상대 온도가 내 온도와 같아짐, 내가 더 따뜻하면 상대가 회복됨 |
+| Q20 | **라운드 간 리셋 범위** | ✅ 전체 초기화, 킬 스코어만 누적 |
 
 ### Resolved: Mini-Game Judgment Model (Q11)
 
@@ -660,46 +719,25 @@ PrepPhase 타이머 만료 → 서버가 턴 종료 판정 → 클라이언트�
       서버의 "턴 종료" 판정이 최종 → 클라는 무조건 실패로 전환.
 ```
 
-### Pending — Item Details
+### Pending (5건)
 
 | # | Question | Context |
 |---|----------|---------|
-| Q1 | **핫팩 미니게임 수치 불일치** — 아이템표 "10초/30번 연타" vs 미니게임표 "7초/15번 연타". 어느 쪽? | 2026-07-18 최종 기획에서도 여전히 불일치. SO 현재값: 10초 |
-
-### Pending — Slot Type (Main/Sub)
-
-| # | Question | Context |
-|---|----------|---------|
-| Q9 | **타로카드 "추가 사용" 타이밍** — Sub로 먼저 발동? 추가 선택은 언제? | 현재 코드: Sub |
-
-### Resolved via Design Spec (질문지 제외 — 기획서에 직접 명시 예정)
-
-| # | Item | Status |
-|---|------|--------|
-| Q6 | **마스크 "음식 아이템" 범위** — 아이템 기획서에 음식 태그 직접 명시 예정 | ⏳ 기획서 대기 |
-| Q8 | **각 아이템 Main/Sub 구분** — 아이템 기획서에 슬롯 구분 직접 명시 예정 | ⏳ 기획서 대기 |
-
-### Pending — Mini-Game
-
-| # | Question | Context |
-|---|----------|---------|
-| Q10 | **미니게임 중 상대방 화면** — 상대에게 표시가 보이는지? | 각자 독립 PrepPhase 진행 |
-
-### Pending — Visual / System
-
-| # | Question | Context |
-|---|----------|---------|
+| Q10 | **미니게임 중 상대방 화면** — 상대에게 미니게임 진행 표시가 보이는지? | 각자 독립 PrepPhase 진행 |
 | Q16 | **아이템 슬롯 UI 레이아웃** — 기본 4 + 랜덤 8 배치 방식? 빈 슬롯 표시? | 현재: 4칸만 |
-| Q19 | **안아줘요 티셔츠 역효과** — 내 온도 > 상대 온도면 상대를 회복시킴. 의도된 리스크? 효과 없음 처리? | 코드: diff ≤ 0이면 ApplyHeal(상대) |
-| Q21 | **버프/디버프 중첩** — 같은 효과 다중 적용 가능? 삼계탕 2연속 = -14°? | 코드: 무제한 중첩 |
+| Q21 | **버프/디버프 중첩** — 같은 효과 다중 적용 가능? 삼계탕 2연속 = -14°? 상한선? | 코드: 무제한 중첩 |
 | Q22 | **이번 턴 선택 아이템 상대 공개** — 보유 목록은 공개(Q15)지만, 뭘 골랐는지는? | 코드: 비공개 |
 | Q23 | **지연 효과 발동 시 방어 가능 여부** — 삼계탕 -7° 발동 턴에 방어 아이템으로 차단? | 코드: 방어 무시 |
 
-### Pending — Ghost System (다인전)
+### Resolved — Ghost System
+
+| # | Question | Answer |
+|---|----------|--------|
+| Q24 | **Frost Strike 데미지** | ✅ −15°, CD 3턴 (구현 완료, 플레이테스트 조정 가능) |
+| Q27 | **고스트 스킬 UI** | ✅ 스킬 버튼 2개 + 클릭-to-타겟 (`GhostSkillPresenter`) |
+
+### Pending — Ghost System (플레이테스트 결정)
 
 | # | Question | Context |
 |---|----------|---------|
-| Q24 | **Frost Strike 데미지** — 즉시 −3°? −5°? | 플레이테스트 결정 |
-| Q25 | **Chill Aura 디버프 중첩** — 복수 고스트 Aura 동시 적용 시 효과? | 플레이테스트 결정 |
-| Q26 | **고스트 위치/이동** — 화면 어디에? 자유 이동? 고정 위치? | TBD |
-| Q27 | **고스트 스킬 UI** — 버튼? 드래그? | TBD |
+| Q26 | **고스트 위치/이동** — 화면 어디에? 자유 이동? 고정 위치? | 현재: 좌석 고정. 이동 시스템 미구현 |

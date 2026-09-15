@@ -1,0 +1,20 @@
+--- a/Runtime/UDPNetworkInterface.cs
++++ b/Runtime/UDPNetworkInterface.cs
+@@ -397,12 +397,17 @@
+                         if (results[i].status == Binding.Baselib_RegisteredNetwork_CompletionStatus.Failed)
+                         {
+                             failedCount++;
++                            // Completion owns no queued packet, so return its acquired buffer.
++                            ReceiveQueue.ReleaseBuffer(bufferIndex);
+                             continue;
+                         }
+ 
+                         var receivedBytes = (int)results[i].bytesTransferred;
+                         if (receivedBytes <= 0 || receivedBytes > ReceiveQueue.PayloadCapacity)
++                        {
++                            ReceiveQueue.ReleaseBuffer(bufferIndex);
+                             continue;
++                        }
+ 
+                         if (!ReceiveQueue.EnqueuePacket(bufferIndex, out var packetProcessor))
+                         {

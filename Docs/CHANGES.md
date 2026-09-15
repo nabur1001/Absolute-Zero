@@ -5,6 +5,30 @@
 
 ---
 
+[2026-09-11] [Claude] [Docs] — PLAN_021 전체 진행도 점검 + GAME_DESIGN.md 동기화. 64 task 중 56 완료 확인 (87.5%), PLAN_021 체크박스 전면 갱신, GAME_DESIGN.md 3건 불일치 수정 (drag→click 타겟, Ghost TBD→Implemented, Multi 씬 레이아웃), Open Questions Q24/Q27 Resolved 이동.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B-6 Balance 구현 (Codex 4→6, self-review 8/10). GetRandomSlotCount(basic 제외), 바람막이 1-use(InitializeBasicItems+ResetForNewRound), 타로 필터(GetRuleAwareDropTable), Deathmatch 지급(GrantDeathmatchItems), MultiRule.asset 값 설정(2/4/4/false/false). 3파일 수정 + 1 asset 수정, 컴파일 에러 0건.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B-5 Network DTO Codex 승인 (8/10, 3회 리뷰). CombatEventNetData(ActorResultTemp+TargetResultTemp 보존), CombatResolutionBatchNetData(TryFromResolution fail-fast, mask/ActionOrder 범위 검증, writer-first validation). 2파일 생성, 컴파일 에러 0건.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B-4 Functional Core Codex 승인 (8/10, 9회 리뷰). MatchCombatSnapshot(deep copy), MultiCombatResolution(CLASS, append-only deltas), CombatResolver.ResolveMulti()(full validation, TryFindItemRule, ValidateSlot, ClampTemp, 9종 EffectKind switch), MultiCombatApplicator(ISeatStateAccessor 전체 delta 적용+inventory consumption). 4파일 생성/수정, 컴파일 에러 0건.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B-3 Value-Type Snapshots Codex 승인 (10/10). GameModeRuleSnapshot(13속성), ItemEffectRuleSnapshot(ItemEffectKind enum+7 subclass exhaustive switch+defensive copy), InventorySnapshot(SlotSnapshot+seat), ScheduledEffectSnapshot. 4파일 생성, 컴파일 에러 0건.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B-2 Item Target Codex 승인 (8/10). TargetMode enum(Self/SingleTarget), 21종 아이템 GetTargetMode() virtual+4 subclass override, TryResolveTargetSeat 서버 검증(Registry TryGetByPlayerIndex, self-target reject, auto-assign reject, 미니게임 후 재검증). 2차 Codex 리뷰 (6/10→8/10). 7파일 수정, 컴파일 에러 0건.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B-1 ActionIntent Codex 승인 (9/10). ActionIntent readonly struct(_isValid default safety, ReadyServerTick at PressReady, NoTarget=255), QueuedAction.TargetSeat, PlayerState _pendingIntent+_pendingMiniGameTarget+_readyServerTick, IPlayerTurnCancellation +ClearPendingIntent, ILocalPlayerCommands +TrySelectItemWithTarget. 6파일 수정/생성, 컴파일 에러 0건.
+
+[2026-09-04] [Claude] [Feature] — PLAN_025 Phase B0 Codex 승인 (8.5/10). DeathService+상태조합+라운드리셋 API 레이어: AuthoritativeDeathService(TryKill+FlushDeathQueue re-entrancy safe+EvaluateRoundEnd), MatchRoster 6종 상태쿼리+upsert, DamageSource readonly struct, RoundEndResult SurvivorMask, ResetSeatsForNewRound roster-driven, BuffDebuffSystem AppliedEffect+ClearForSeat+ClearAll. 5차 Codex 리뷰 (7.0→8.2→8.9→7.0→8.5), HIGH 0건. 컴파일 에러 0건.
+
+[2026-09-03] [Claude] [Feature] — PLAN_025 Phase A 인프라 완료 (Codex 9.1/10 최종 승인). Multi 3~4인 Disconnect/Ghost 인프라 레이어: ISeatStateAccessor+SeatRuntimeState, MatchRoster(ISeatStateAccessor impl+offline NV capture+despawn+event), DisconnectDispatcher(DDOL singleton), SessionParticipantTable(NSC session-scoped), PlayerState.CurrentLifeState NV, LifeState enum+DamageSource struct, TurnManager 동적 배열 resize(_players/_modifiers/_tempsAtTurnStart), GameDataBridge LifeState 구독+unbind 캐시+OnDestroy cleanup, OpponentBarPresenter persistent OppBarRoot+null target cleanup, RoundResultPresenter Multi lobby return, MatchCompositionRoot SPT wiring, Player.prefab DontDestroyWithOwner=true. 14파일 수정/생성, 컴파일 에러 0건.
+
+[2026-08-31] [Claude] [Feature] — PLAN_024 Rematch System v7 구현. 매치 종료 후 15초 재대결 투표 (MatchState RematchVote/RematchDeclined, epoch/deadline/atomic latch, 4조건 gate UI). MatchManager 전이함수+투표+roster+disconnect, TurnManager WaitForRematchDecision+BootstrapNewMatch, RoundResultPresenter ReconcileRematchVoteUI+타이머+auto-leave. 11파일 수정/재작성, 컴파일 에러 0건.
+
+[2026-08-30] [Claude] [Feature] — PLAN_023 Phase A+B+C-1 구현. Lobby MVP 분해 (AZLobbyUI 854줄 → LobbyPresenter + 5 Views + UIHelper), 볼륨 base×master + 닉네임 시스템. Customization System: CosmeticItemSO/RegistrySO/Dto/EquipState 데이터 모델, CosmeticProfileService(9-step TryValidateAndCanonicalizeDto), Visual Apply(Overlay/Swap/Controller), ClosetView(5-tab equip UI), PlayerState CosmeticDataNV+SubmitCosmeticRpc, AZPlayerVisual 5-part cosmetic hookup, LobbyManager.SetPlayerCosmeticDataAsync. Closet 버튼 활성화. 13파일 생성/수정, 컴파일 에러 0건.
+
+[2026-08-30] [Claude] [Design] — GAME_DESIGN.md 기획 답변 48/55건 반영. 아이템표 수치 동기화 (물총 8°, 스마트폰 4→6→7°/5%, 핫팩 12°/7s15tap, 삼계탕 7%, 불닭 +20°), 바람막이 도구 공격만 방어, 마스크 음식 7종 명시, Ghost 규칙 확정 (PrepPhase 자유/디버프 1개/생존자만/라스트킬 인정), Bot 미니게임 미사용+별도 클라, C2 중간사망=취소, CU5 로비 동기화. SO 에셋 5개 수치 수정.
+
 [2026-08-27] [Claude] [Feature] — PLAN_022 Phase C+D 구현. 9-4 CinematicOverlay (fade/text-rise 라운드/매치 종료 연출, RoundResultPresenter 코루틴 재작성), 9-7 Progress HUD (player name boxes + crown ♛ + attacker box highlight via OnAttackerChanged pipeline), 9-8 Selection Arrow (procedural triangle + bounce animation + phase auto-hide). PLAN_022 전 Phase 구현 완료 — 런타임 플레이테스트 대기.
 
 [2026-08-27] [Claude] [Feature] — PLAN_022 Phase A + Cross-cutting 구현. 1v1 개선: PrepPhase 1초 면역 (skipFirstFanTick), 3초 최소 연출 envelope (MIN_ACTION_DURATION + padding), 사망 시퀀스 endsMatch 분기 (PlayDeathSequenceAndWait, PlayBreakParticles(heavy)), CombatResultData.EndsMatch NV, MatchManager.WouldEndMatch(), FirstReadySeat NV lifecycle (TurnManager→GameDataBridge→MatchSnapshot), barrier timeout floor 15f, HandleRoundEnd 6s, REBUILD_LOCK_TIMEOUT 15s. 8파일 수정.

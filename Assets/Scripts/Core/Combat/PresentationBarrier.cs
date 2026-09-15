@@ -23,8 +23,15 @@ namespace AbsoluteZero.Core.Combat
         public bool IsComplete => State == BarrierState.Completed;
         public uint CurrentSequence => _currentSequence;
 
-        public void Begin(uint sequence, IEnumerable<ulong> expectedClientIds)
+        public bool Begin(uint sequence, IEnumerable<ulong> expectedClientIds)
         {
+            if (IsActive)
+            {
+                Debug.LogError(
+                    $"[PresentationBarrier] Begin rejected: seq={_currentSequence} is still active; requested={sequence}");
+                return false;
+            }
+
             _currentSequence = sequence;
             _pendingClients.Clear();
 
@@ -35,11 +42,12 @@ namespace AbsoluteZero.Core.Combat
             {
                 State = BarrierState.Completed;
                 Debug.Log($"[PresentationBarrier] Begin seq={sequence}, no clients — immediate complete");
-                return;
+                return true;
             }
 
             State = BarrierState.Waiting;
             Debug.Log($"[PresentationBarrier] Begin seq={sequence}, expecting {_pendingClients.Count} clients");
+            return true;
         }
 
         public void ReceiveAck(uint sequence, ulong senderClientId)

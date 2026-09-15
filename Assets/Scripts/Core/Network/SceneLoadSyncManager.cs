@@ -61,9 +61,7 @@ namespace AbsoluteZero.Core.Network
                 loadedClients = new HashSet<ulong>();
                 timeoutTimer = loadTimeout;
 
-                int total = 1;
-                if (LobbyManager.Instance != null && LobbyManager.Instance.CurrentLobby != null)
-                    total = LobbyManager.Instance.CurrentLobby.Players.Count;
+                int total = Mathf.Max(1, NetworkManager.ConnectedClientsIds.Count);
 
                 networkTotalCount.Value = total;
                 networkLoadedCount.Value = 0;

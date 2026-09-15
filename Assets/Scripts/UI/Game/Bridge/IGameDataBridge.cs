@@ -27,5 +27,6 @@ namespace AbsoluteZero.UI.Game.Bridge
         event Action<int> OnCurrentAttackerChanged;
         event Action<MatchSnapshot> OnRoundResult;
         event Action<MatchSnapshot> OnMatchEnd;
+        event Action<byte> OnRematchDecisionChanged;
     }
 }

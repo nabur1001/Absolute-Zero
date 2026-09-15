@@ -1,9 +1,18 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace AbsoluteZero.UI.Game.Build
 {
+    public struct OppBarEntry
+    {
+        public Canvas Canvas;
+        public TextMeshProUGUI TempText;
+        public Slider HpSlider;
+        public Image HpFillImage;
+    }
+
     public sealed class GameHudRefs
     {
         public Canvas OverlayCanvas;
@@ -26,6 +35,8 @@ namespace AbsoluteZero.UI.Game.Build
         public Image CinematicOverlay;
         public TextMeshProUGUI CinematicText;
         public Button LobbyButton;
+        public Button RematchButton;
+        public TextMeshProUGUI RematchStatusText;
 
         public Image P1NameBox;
         public Image P2NameBox;
@@ -33,13 +44,25 @@ namespace AbsoluteZero.UI.Game.Build
         public TextMeshProUGUI P2NameText;
         public TextMeshProUGUI CrownText;
 
+        public Image[] NameBoxes;
+        public TextMeshProUGUI[] NameTexts;
+
         public Canvas OppBarCanvas;
         public TextMeshProUGUI OppTempText;
         public Slider OppHpSlider;
         public Image OppHpFillImage;
 
+        public List<OppBarEntry> OppBars = new();
+
         public Canvas ReadyCanvas;
         public Button ReadyButton;
         public Image ReadyButtonImage;
+
+        public GameObject GhostSkillPanel;
+        public Button FrostStrikeButton;
+        public TextMeshProUGUI FrostStrikeCooldownText;
+        public Button ChillAuraButton;
+        public TextMeshProUGUI ChillAuraCooldownText;
+        public TextMeshProUGUI GhostStatusText;
     }
 }

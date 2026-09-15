@@ -35,19 +35,23 @@ namespace AbsoluteZero.Core.Combat
                 P2TempAtTurnStart = p2TempAtTurnStart,
                 P1TempBeforeCombat = p1.Temperature.Value,
                 P2TempBeforeCombat = p2.Temperature.Value,
-                P1SubItemId = q1.subAction.HasValue
-                    ? p1.GetInventory().SlotStates[q1.subAction.Value.SlotIndex].ItemId
-                    : (short)-1,
-                P2SubItemId = q2.subAction.HasValue
-                    ? p2.GetInventory().SlotStates[q2.subAction.Value.SlotIndex].ItemId
-                    : (short)-1,
-                P1MainItemId = q1.selectedAction.HasValue
-                    ? p1.GetInventory().SlotStates[q1.selectedAction.Value.SlotIndex].ItemId
-                    : (short)-1,
-                P2MainItemId = q2.selectedAction.HasValue
-                    ? p2.GetInventory().SlotStates[q2.selectedAction.Value.SlotIndex].ItemId
-                    : (short)-1,
+                P1SubItemId = GetQueuedItemId(p1, q1.subAction),
+                P2SubItemId = GetQueuedItemId(p2, q2.subAction),
+                P1MainItemId = GetQueuedItemId(p1, q1.selectedAction),
+                P2MainItemId = GetQueuedItemId(p2, q2.selectedAction),
             };
+        }
+
+        static short GetQueuedItemId(PlayerState player, QueuedAction? queued)
+        {
+            if (!queued.HasValue || player == null) return -1;
+            var inventory = player.GetInventory();
+            byte slot = queued.Value.SlotIndex;
+            if (inventory == null || slot >= inventory.SlotStates.Count) return -1;
+            return inventory.GetItemData(slot) == queued.Value.ItemData
+                && inventory.SlotStates[slot].IsUsable
+                ? inventory.SlotStates[slot].ItemId
+                : (short)-1;
         }
 
         public CombatResult ResolveCombat(
@@ -75,8 +79,13 @@ namespace AbsoluteZero.Core.Combat
             result.P2TempAfterCombat = p2.Temperature.Value;
             result.P1SubItemId = snapshot.P1SubItemId;
             result.P2SubItemId = snapshot.P2SubItemId;
-            result.P1MainItemId = snapshot.P1MainItemId;
-            result.P2MainItemId = snapshot.P2MainItemId;
+            result.P1MainItemId = -1;
+            result.P2MainItemId = -1;
+            foreach (var evt in result.Events)
+            {
+                if (evt.SourcePlayer == 0) result.P1MainItemId = evt.ItemId;
+                else if (evt.SourcePlayer == 1) result.P2MainItemId = evt.ItemId;
+            }
             result.ResultSequence = ++resultSequence;
 
             string winText = result.WinnerIndex >= 0 ? $"P{result.WinnerIndex} WINS" : "no death";
@@ -101,6 +110,12 @@ namespace AbsoluteZero.Core.Combat
 
             var action = queue.subAction.Value;
             var inventory = player.GetInventory();
+            if (GetQueuedItemId(player, queue.subAction) < 0)
+            {
+                Debug.Log($"[COMBAT] ExecuteSubItems: P{playerIndex} selected copy changed — action cancelled");
+                queue.subAction = null;
+                return;
+            }
 
             float userTempBefore = player.Temperature.Value;
             float opponentTempBefore = opponent.Temperature.Value;

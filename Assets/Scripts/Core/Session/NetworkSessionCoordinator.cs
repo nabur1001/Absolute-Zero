@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using AbsoluteZero.Core.Cosmetic;
 using AbsoluteZero.Core.Network;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
@@ -40,6 +41,7 @@ namespace AbsoluteZero.Core.Session
         public static NetworkSessionCoordinator Instance { get; private set; }
 
         [SerializeField] float relayCodeTimeoutSeconds = 30f;
+        [SerializeField] float gameEntryTimeoutSeconds = 60f;
         [SerializeField] int maxPlayers = 2;
 
         SessionState _state = SessionState.Offline;
@@ -48,6 +50,11 @@ namespace AbsoluteZero.Core.Session
         string _lastError;
         bool _isHostRole;
         Lobby _currentLobby;
+
+        GameMode _selectedMode = GameMode.OneVsOne;
+        int _selectedPlayerCount = 2;
+
+        SessionParticipantTable _participantTable;
 
         IUnityServicesGateway _services;
         ILobbyGateway _lobbyGateway;
@@ -60,6 +67,10 @@ namespace AbsoluteZero.Core.Session
         public string LastError => _lastError;
         public bool IsHostRole => _isHostRole;
         public Lobby CurrentLobby => _currentLobby;
+        public GameMode SelectedMode => _selectedMode;
+        public int SelectedPlayerCount => _selectedPlayerCount;
+
+        public SessionParticipantTable ParticipantTable => _participantTable;
 
         public event Action<SessionState, SessionOperation> OnStateChanged;
         public event Action<string> OnError;
@@ -112,6 +123,7 @@ namespace AbsoluteZero.Core.Session
 
         void OnDestroy()
         {
+            _operationGeneration++;
             if (Instance == this) Instance = null;
         }
 
@@ -147,6 +159,8 @@ namespace AbsoluteZero.Core.Session
         void OnNetworkStopped(bool wasHost)
         {
             if (_state == SessionState.Disconnecting) return;
+            // The pending entry operation owns cleanup and reports its failure.
+            if (_state == SessionState.LoadingGame) return;
 
             if (_state != SessionState.InGame && _state != SessionState.LoadingGame &&
                 _state != SessionState.Connecting)
@@ -155,6 +169,10 @@ namespace AbsoluteZero.Core.Session
             Debug.Log("[SessionCoordinator] External network stop detected — resetting to Ready");
             _currentLobby = null;
             _isHostRole = false;
+            _selectedMode = GameMode.OneVsOne;
+            _selectedPlayerCount = 2;
+            _participantTable?.Clear();
+            _participantTable = null;
             _operationGeneration++;
 
             var lobbyMgr = LobbyManager.Instance;
@@ -189,6 +207,7 @@ namespace AbsoluteZero.Core.Session
 
         OperationScope BeginOperation()
         {
+            _lastError = null;
             _operationGeneration++;
             return new OperationScope(() => _operationGeneration);
         }
@@ -233,6 +252,13 @@ namespace AbsoluteZero.Core.Session
             await InitializeAsync();
         }
 
+        public void SetMatchParameters(GameMode mode, int playerCount)
+        {
+            _selectedMode = mode;
+            _selectedPlayerCount = Mathf.Clamp(playerCount, 2, 4);
+            Debug.Log($"[SessionCoordinator] Match params set — Mode={_selectedMode}, Players={_selectedPlayerCount}");
+        }
+
         public async Task<Result<Unit>> CreateLobbyAsync(string lobbyName = null)
         {
             if (_state != SessionState.Ready)
@@ -242,13 +268,15 @@ namespace AbsoluteZero.Core.Session
             lobbyName ??= $"AZ_{UnityEngine.Random.Range(1000, 9999)}";
 
             SetState(SessionState.Connecting, SessionOperation.CreatingLobby);
-            var createResult = await _lobbyGateway.CreateAsync(lobbyName, maxPlayers, new CreateLobbyOptions
+            int lobbySlots = _selectedPlayerCount;
+            var createResult = await _lobbyGateway.CreateAsync(lobbyName, lobbySlots, new CreateLobbyOptions
             {
                 IsPrivate = false,
                 Player = CreatePlayerData(),
                 Data = new Dictionary<string, DataObject>
                 {
-                    { "GameMode", new DataObject(DataObject.VisibilityOptions.Public, "TurnBattle") },
+                    { "GameMode", new DataObject(DataObject.VisibilityOptions.Public, _selectedMode.ToString()) },
+                    { "PlayerCount", new DataObject(DataObject.VisibilityOptions.Public, lobbySlots.ToString()) },
                     { "HostReady", new DataObject(DataObject.VisibilityOptions.Public, "false") },
                     { "RelayJoinCode", new DataObject(DataObject.VisibilityOptions.Member, "") },
                     { "GameStarted", new DataObject(DataObject.VisibilityOptions.Member, "false") }
@@ -278,16 +306,18 @@ namespace AbsoluteZero.Core.Session
             var scope = BeginOperation();
             scope.PushCompensation(() => CleanupLobby(_currentLobby.Id));
 
-            // 1) Allocate relay
+            // 1) Allocate relay — maxConnections = joining clients (playerCount - 1)
             SetState(SessionState.Connecting, SessionOperation.AllocatingRelay);
+            int relayConnections = _selectedPlayerCount - 1;
 
-            var relayResult = await _relayGateway.AllocateAsync(maxPlayers);
+            var relayResult = await _relayGateway.AllocateAsync(relayConnections);
             if (relayResult.IsFailure) { await scope.RunCompensations(); return FailAndRecover(relayResult.ErrorCode, relayResult.ErrorMessage); }
             if (scope.IsStale) return await scope.CancelWithCompensation();
 
-            // 2) Start host
+            // 2) Start host — register ConnectionApproval first
             SetState(SessionState.Connecting, SessionOperation.StartingHost);
-            scope.PushCompensation(() => { _networkRuntime.Shutdown(); return Task.CompletedTask; });
+            RegisterConnectionApproval();
+            scope.PushCompensation(() => { UnregisterConnectionApproval(); _networkRuntime.Shutdown(); return Task.CompletedTask; });
 
             var hostResult = _networkRuntime.StartHost(relayResult.Value.ServerData);
             if (hostResult.IsFailure) { await scope.RunCompensations(); return FailAndRecover(hostResult.ErrorCode, hostResult.ErrorMessage); }
@@ -308,11 +338,12 @@ namespace AbsoluteZero.Core.Session
 
             if (scope.IsStale) return await scope.CancelWithCompensation();
 
-            // 4) Load game scene
+            // 4) Load game scene — branch by mode
             SetState(SessionState.LoadingGame);
             LobbyManager.Instance?.SetGameSessionActive(true);
 
-            var sceneResult = _networkRuntime.LoadNetworkScene("GameScene");
+            string sceneName = _selectedMode == GameMode.Multi ? "GameScene_Multi" : "GameScene";
+            var sceneResult = _networkRuntime.LoadNetworkScene(sceneName);
             if (sceneResult.IsFailure)
             {
                 LobbyManager.Instance?.SetGameSessionActive(false);
@@ -320,8 +351,7 @@ namespace AbsoluteZero.Core.Session
                 return FailAndRecover(sceneResult.ErrorCode, sceneResult.ErrorMessage);
             }
 
-            SetState(SessionState.InGame);
-            return Result<Unit>.Success(Unit.Value);
+            return await CompleteGameEntryAsync(scope, sceneName);
         }
 
         public async Task<Result<Unit>> JoinGameAsync(string lobbyCode)
@@ -372,8 +402,46 @@ namespace AbsoluteZero.Core.Session
             SetState(SessionState.LoadingGame);
             LobbyManager.Instance?.SetGameSessionActive(true);
 
-            SetState(SessionState.InGame);
-            return Result<Unit>.Success(Unit.Value);
+            string sceneName = _selectedMode == GameMode.Multi ? "GameScene_Multi" : "GameScene";
+            return await CompleteGameEntryAsync(scope, sceneName);
+        }
+
+        async Task<Result<Unit>> CompleteGameEntryAsync(OperationScope scope, string sceneName)
+        {
+            float deadline = Time.realtimeSinceStartup + gameEntryTimeoutSeconds;
+            var nm = Unity.Netcode.NetworkManager.Singleton;
+            while (this != null && !scope.IsStale)
+            {
+                if (nm == null || !nm.IsListening)
+                {
+                    string reason = nm != null ? nm.DisconnectReason : null;
+                    string message = string.IsNullOrEmpty(reason)
+                        ? "Game connection closed before scene synchronization completed" : reason;
+                    SetError(message);
+                    await LeaveAsync();
+                    return Result<Unit>.Failure(OperationErrorCode.NetworkStartFailed, message);
+                }
+
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneByName(sceneName);
+                // NGO sets IsConnectedClient after initial scene synchronization.
+                if (nm.IsConnectedClient && scene.IsValid() && scene.isLoaded &&
+                    UnityEngine.SceneManagement.SceneManager.GetActiveScene() == scene)
+                {
+                    SetState(SessionState.InGame);
+                    return Result<Unit>.Success(Unit.Value);
+                }
+
+                if (Time.realtimeSinceStartup >= deadline)
+                {
+                    const string message = "Timed out waiting for game scene synchronization";
+                    SetError(message);
+                    await LeaveAsync();
+                    return Result<Unit>.Failure(OperationErrorCode.Timeout, message);
+                }
+                await Task.Delay(100);
+            }
+            // A newer leave/join owns the session; never shut it down here.
+            return Result<Unit>.Failure(OperationErrorCode.Cancelled, "Game entry was cancelled");
         }
 
         public async Task LeaveAsync()
@@ -385,6 +453,7 @@ namespace AbsoluteZero.Core.Session
 
             try
             {
+                UnregisterConnectionApproval();
                 _networkRuntime.Shutdown();
 
                 if (RelayManager.Instance != null)
@@ -410,6 +479,10 @@ namespace AbsoluteZero.Core.Session
 
                 _currentLobby = null;
                 _isHostRole = false;
+                _selectedMode = GameMode.OneVsOne;
+                _selectedPlayerCount = 2;
+                _participantTable?.Clear();
+                _participantTable = null;
 
                 var lobbyMgr = LobbyManager.Instance;
                 if (lobbyMgr != null)
@@ -433,11 +506,71 @@ namespace AbsoluteZero.Core.Session
 
         #region Internal Helpers
 
+        void RegisterConnectionApproval()
+        {
+            var nm = Unity.Netcode.NetworkManager.Singleton;
+            if (nm == null) return;
+            nm.ConnectionApprovalCallback += ApproveConnection;
+            nm.NetworkConfig.ConnectionApproval = true;
+        }
+
+        void UnregisterConnectionApproval()
+        {
+            var nm = Unity.Netcode.NetworkManager.Singleton;
+            if (nm == null) return;
+            nm.ConnectionApprovalCallback -= ApproveConnection;
+        }
+
+        void ApproveConnection(
+            Unity.Netcode.NetworkManager.ConnectionApprovalRequest request,
+            Unity.Netcode.NetworkManager.ConnectionApprovalResponse response)
+        {
+            var nm = Unity.Netcode.NetworkManager.Singleton;
+            int connected = nm != null ? nm.ConnectedClientsIds.Count : 0;
+
+            if (connected >= _selectedPlayerCount)
+            {
+                response.Approved = false;
+                response.Reason = "Lobby full";
+                Debug.Log($"[SessionCoordinator] Connection denied — {connected}/{_selectedPlayerCount}");
+                return;
+            }
+
+            response.Approved = true;
+            response.CreatePlayerObject = false;
+        }
+
         Result<Unit> FailAndRecover(OperationErrorCode code, string message)
         {
             SetError(message);
             SetState(SessionState.Ready);
             return Result<Unit>.Failure(code, message);
+        }
+
+        public SessionParticipantTable BuildParticipantTable(IReadOnlyList<ulong> connectedClientIds, int requiredCount)
+        {
+            if (_participantTable != null && _participantTable.Count >= requiredCount)
+            {
+                Debug.Log($"[SessionCoordinator] ParticipantTable already populated ({_participantTable.Count} entries) — reusing");
+                return _participantTable;
+            }
+
+            _participantTable = new SessionParticipantTable();
+            var sorted = new List<ulong>(connectedClientIds);
+            sorted.Sort();
+
+            byte seat = 0;
+            foreach (var clientId in sorted)
+            {
+                if (seat >= requiredCount) break;
+                string pid = clientId.ToString();
+                _participantTable.Register(pid, "match");
+                _participantTable.TryValidateAndBind(pid, "match", clientId, out _);
+                seat++;
+            }
+
+            Debug.Log($"[SessionCoordinator] ParticipantTable built — {seat} seats from {connectedClientIds.Count} clients");
+            return _participantTable;
         }
 
         void SyncLobbyManager(Lobby lobby, bool isHostRole)
@@ -516,13 +649,21 @@ namespace AbsoluteZero.Core.Session
             string playerId = _services.PlayerId;
             string shortId = playerId?.Length >= 6 ? playerId[..6] : (playerId ?? "Unknown");
 
+            var profileService = CosmeticProfileService.Instance;
+            string nickname = profileService != null ? profileService.Nickname : "";
+            if (string.IsNullOrEmpty(nickname))
+                nickname = $"Player_{shortId}";
+
+            string cosmeticDto = profileService != null ? (profileService.GetCompactDto() ?? "") : "";
+
             return new LobbyPlayer
             {
                 Data = new Dictionary<string, PlayerDataObject>
                 {
-                    { "PlayerName", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, $"Player_{shortId}") },
+                    { "PlayerName", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, nickname) },
                     { "IsReady", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, "false") },
-                    { "LastAction", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, "") }
+                    { "LastAction", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Public, "") },
+                    { "CosmeticData", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, cosmeticDto) }
                 }
             };
         }

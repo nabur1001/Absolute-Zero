@@ -2,6 +2,7 @@ using System.Collections;
 using AbsoluteZero.Core.Audio;
 using AbsoluteZero.Core.Common;
 using AbsoluteZero.Core.Item;
+using AbsoluteZero.Core.Network;
 using AbsoluteZero.UI.Game.Bridge;
 using AbsoluteZero.UI.Game.Build;
 using AbsoluteZero.UI.MiniGame;
@@ -29,8 +30,7 @@ namespace AbsoluteZero.UI.Game.Presenters
         bool _alarmShaking;
         Coroutine _alarmCoroutine;
 
-        Image _p1NameBox;
-        Image _p2NameBox;
+        Image[] _nameBoxes;
         TextMeshProUGUI _crownText;
         static readonly Color BOX_NORMAL = new(0.15f, 0.15f, 0.2f, 0.8f);
         static readonly Color BOX_ACTIVE = new(0.35f, 0.35f, 0.55f, 0.9f);
@@ -78,8 +78,7 @@ namespace AbsoluteZero.UI.Game.Presenters
             _readyButtonImage = refs.ReadyButtonImage;
             _envPanel = refs.EnvPanel;
             _envText = refs.EnvText;
-            _p1NameBox = refs.P1NameBox;
-            _p2NameBox = refs.P2NameBox;
+            _nameBoxes = refs.NameBoxes ?? new[] { refs.P1NameBox, refs.P2NameBox };
             _crownText = refs.CrownText;
 
             _readyButton.onClick.AddListener(OnReadyClicked);
@@ -117,8 +116,14 @@ namespace AbsoluteZero.UI.Game.Presenters
 
             if (_readyCanvas != null)
             {
-                _readyCanvas.gameObject.SetActive(newPhase == TurnPhase.PrepPhase);
-                if (newPhase == TurnPhase.PrepPhase)
+                bool isLocalGhost = false;
+                var match = _bridge.CurrentMatch;
+                byte localSeat = _bridge.LocalSeatIndex;
+                if (match.LifeStates != null && localSeat < match.LifeStates.Length)
+                    isLocalGhost = match.LifeStates[localSeat] == Core.Player.LifeState.Ghost;
+
+                _readyCanvas.gameObject.SetActive(newPhase == TurnPhase.PrepPhase && !isLocalGhost);
+                if (newPhase == TurnPhase.PrepPhase && !isLocalGhost)
                 {
                     var defaultSprite = GameSprites.Get(GameSprites.BTN_DEFAULT);
                     if (_readyButtonImage != null && defaultSprite != null)
@@ -222,7 +227,20 @@ namespace AbsoluteZero.UI.Game.Presenters
 
         void UpdateScoreDisplay(MatchSnapshot match)
         {
-            _scoreText.text = $"{match.P1RoundWins} : {match.P2RoundWins}";
+            if (match.Mode == GameMode.Multi && match.KillScores != null)
+            {
+                var parts = new System.Text.StringBuilder();
+                for (int i = 0; i < match.KillScores.Length; i++)
+                {
+                    if (i > 0) parts.Append(" : ");
+                    parts.Append(match.KillScores[i]);
+                }
+                _scoreText.text = parts.ToString();
+            }
+            else
+            {
+                _scoreText.text = $"{match.P1RoundWins} : {match.P2RoundWins}";
+            }
         }
 
         void UpdateCrown(MatchSnapshot match)
@@ -231,21 +249,27 @@ namespace AbsoluteZero.UI.Game.Presenters
             bool showCrown = match.CurrentPhase == TurnPhase.AttackPhase
                              && match.FirstReadySeat != byte.MaxValue;
             _crownText.gameObject.SetActive(showCrown);
-            if (showCrown)
+            if (showCrown && _nameBoxes != null)
             {
-                var rt = _crownText.GetComponent<RectTransform>();
-                rt.anchoredPosition = match.FirstReadySeat == 0
-                    ? new Vector2(-80, 0)
-                    : new Vector2(80, 0);
+                int seat = match.FirstReadySeat;
+                if (seat >= 0 && seat < _nameBoxes.Length && _nameBoxes[seat] != null)
+                {
+                    var crownRT = _crownText.GetComponent<RectTransform>();
+                    var boxRT = _nameBoxes[seat].GetComponent<RectTransform>();
+                    if (crownRT.parent == boxRT.parent)
+                        crownRT.anchoredPosition = new Vector2(boxRT.anchoredPosition.x - 65f, 0);
+                }
             }
         }
 
         void HandleAttackerChanged(int seatIdx)
         {
-            if (_p1NameBox != null)
-                _p1NameBox.color = seatIdx == 0 ? BOX_ACTIVE : BOX_NORMAL;
-            if (_p2NameBox != null)
-                _p2NameBox.color = seatIdx == 1 ? BOX_ACTIVE : BOX_NORMAL;
+            if (_nameBoxes == null) return;
+            for (int i = 0; i < _nameBoxes.Length; i++)
+            {
+                if (_nameBoxes[i] != null)
+                    _nameBoxes[i].color = i == seatIdx ? BOX_ACTIVE : BOX_NORMAL;
+            }
         }
 
         void HandleHasSelectedItemChanged(bool hasItem)
@@ -253,6 +277,14 @@ namespace AbsoluteZero.UI.Game.Presenters
             _hasSelectedItem = hasItem;
             if (hasItem)
                 _statusText.text = "Item selected!";
+        }
+
+        public bool TryReadyByKey()
+        {
+            if (_readyButton == null || !_readyButton.interactable) return false;
+            if (_readyCanvas == null || !_readyCanvas.gameObject.activeInHierarchy) return false;
+            OnReadyClicked();
+            return true;
         }
 
         void OnReadyClicked()

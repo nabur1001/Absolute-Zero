@@ -1,0 +1,619 @@
+{
+  "schema": 1,
+  "source": ".claude/skills",
+  "validation": "All files structurally checked; topic compatibility reviewed; tutorial code not exhaustively compiled.",
+  "skills": [
+    {
+      "name": "unity-ai-navigation",
+      "mode": "adapted-reference",
+      "scope": "NavMesh surfaces, agents, obstacles, links, patrols and inference references",
+      "existing_specialists": "initialize-ai-navigation",
+      "project_notes": "Navigation and inference examples are conditional on installed packages; verify Sentis/Inference Engine namespace and worker APIs. NPC/bot implementation is not activated by this import.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-ai-navigation/references/navmesh-guide.md",
+          "source_sha256": "cc94f5afe45fa47bdfdfda97c11188d63aeb072f09e521bbda700ae4059d44dc",
+          "target": ".codex/skills/unity-ai-navigation/references/navmesh-guide.md",
+          "target_sha256": "c8a092ad1f8ef1631a52ccc998802fe5f9401ae4a0d1a0398f19492e8ce4a818"
+        },
+        {
+          "source": ".claude/skills/unity-ai-navigation/references/sentis-ml.md",
+          "source_sha256": "560f98e07b0d6bcd0af8a0c71ba7cf2d461fb88bb73a20cd7075998cf6752c6d",
+          "target": ".codex/skills/unity-ai-navigation/references/sentis-ml.md",
+          "target_sha256": "0f3b7d38f42dd3b14db2ce54e5c85d01c915b26b7f912237a29fdf8541ecd77d"
+        },
+        {
+          "source": ".claude/skills/unity-ai-navigation/SKILL.md",
+          "source_sha256": "33f7b5f41e77d9ddae355b9cf8beca08fcb239c544772e61d8e890ca9808496f",
+          "target": ".codex/skills/unity-ai-navigation/reference-guide.md",
+          "target_sha256": "efa7cb0aded290a2beb5f986b6fc403d9b9fdc697e8c6eded1eadb67c78571dd"
+        }
+      ]
+    },
+    {
+      "name": "unity-animation",
+      "mode": "adapted-reference",
+      "scope": "Animator controllers, clips, blend trees, root motion, events and Timeline",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Preserve sequential combat presentation and current visual owners. Adapt legacy Input examples to existing actions; animation cannot mutate authoritative combat state.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-animation/references/animation-clips.md",
+          "source_sha256": "fb97185d79e4c07badf5225cd405de0fc51fc42be2ae27de2f8cbc033ad036ee",
+          "target": ".codex/skills/unity-animation/references/animation-clips.md",
+          "target_sha256": "b911ed5ce73b5e3c52869a22f799c6d87c6323c4f22d1e8d6d560f379de50271"
+        },
+        {
+          "source": ".claude/skills/unity-animation/references/animator-controller.md",
+          "source_sha256": "e9b1586db766cefe2a11dc36a86f32c8afa44b46de4cee95c74e6366ad21aeb1",
+          "target": ".codex/skills/unity-animation/references/animator-controller.md",
+          "target_sha256": "054740edbbb346a18dbfb54e2e72f96b1d61cae0d3ab3184a769fdd148b69fd8"
+        },
+        {
+          "source": ".claude/skills/unity-animation/references/timeline.md",
+          "source_sha256": "9a06a84f885d235cddd9fffae1995c282ca70dacb8e7bf894967d97dfa24f1e2",
+          "target": ".codex/skills/unity-animation/references/timeline.md",
+          "target_sha256": "2319a1d812384188237a51be48c7356c52ba9063ddbdf4ffb20db6f7c798ca33"
+        },
+        {
+          "source": ".claude/skills/unity-animation/SKILL.md",
+          "source_sha256": "d90ec6d60d140b3f4dc6e4b2ea27d1518e701457543967c334c6dbf8056314ef",
+          "target": ".codex/skills/unity-animation/reference-guide.md",
+          "target_sha256": "90eaa2d5b05197665ae62688b444f0eac8aa2ac8973a91fac456e2eb71b48758"
+        }
+      ]
+    },
+    {
+      "name": "unity-async-patterns",
+      "mode": "adapted-reference",
+      "scope": "Awaitable cancellation, thread context, coroutine lifetime and asset handles",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Read AI_TARGET_ARCHITECTURE for async changes. AsTask examples need the custom bridge; destroy cancellation alone does not cover network despawn or round reset.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-async-patterns/references/async-cancellation-patterns.md",
+          "source_sha256": "0066292ef68ac33d29416303eabe6aff02c73e48a9715ec2b8c266887849949a",
+          "target": ".codex/skills/unity-async-patterns/references/async-cancellation-patterns.md",
+          "target_sha256": "261d4c509376feb2fe8e77305e0349b56de8ce9f2354bcdc7ac5ba7c668761e0"
+        },
+        {
+          "source": ".claude/skills/unity-async-patterns/SKILL.md",
+          "source_sha256": "04a5b17682bbc86cdc75d551f3c3cf020e27e81d4d682dcc8996244e17efc9cc",
+          "target": ".codex/skills/unity-async-patterns/reference-guide.md",
+          "target_sha256": "e25c82311321777f9685ededbc351bad05efc8f5310f832f9b652e5cf77e5d8c"
+        }
+      ]
+    },
+    {
+      "name": "unity-audio",
+      "mode": "adapted-reference",
+      "scope": "AudioSource, clips, mixers, spatial sound and playback patterns",
+      "existing_specialists": "optimize-audio, audio-setup-mixers",
+      "project_notes": "Use existing GameAudioManager routing; distinguish missing audio assets from code defects. Mixer creation/import changes remain task-scoped.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-audio/references/audio-api.md",
+          "source_sha256": "9f2a6433f7e4cbdbead8e23521fd0872997f25c718e91c4e84354594ab02687f",
+          "target": ".codex/skills/unity-audio/references/audio-api.md",
+          "target_sha256": "46def16a20587b9d6caabc9277f1df3083f0f3b020dfff6449bea92cd940f759"
+        },
+        {
+          "source": ".claude/skills/unity-audio/SKILL.md",
+          "source_sha256": "676c33ca30d671e35f2937f4686a859cc995054faf4a59e080299f4dd2954151",
+          "target": ".codex/skills/unity-audio/reference-guide.md",
+          "target_sha256": "f1fbd65056f8fed2e5aa5558519043a6c2629c18f0b65d48361f0d5268131bad"
+        }
+      ]
+    },
+    {
+      "name": "unity-data-driven",
+      "mode": "adapted-reference",
+      "scope": "ScriptableObject configuration, JSON pipelines, data migration and designer handoff",
+      "existing_specialists": "unity-package-management",
+      "project_notes": "Keep item SO configuration immutable at runtime. Separate replicated runtime state from source data; check serializer-specific rename/migration behavior.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-data-driven/references/data-pipeline-patterns.md",
+          "source_sha256": "d89b6ffc41430f8b9a71ce7da3edf0c6fea88c86475f2792344c1718f1c5fd59",
+          "target": ".codex/skills/unity-data-driven/references/data-pipeline-patterns.md",
+          "target_sha256": "72a477034c54fd0718be195f714c5a7741461a7e7d92f3b4ee03a4afea38437f"
+        },
+        {
+          "source": ".claude/skills/unity-data-driven/SKILL.md",
+          "source_sha256": "8322bcdd4596eceb8abef32ecefae56d71e284c40da606665b02d664ec0e7928",
+          "target": ".codex/skills/unity-data-driven/reference-guide.md",
+          "target_sha256": "202048bd1d5146b6858471ee63081b70e99f956de936386de4213375a13dc66d"
+        }
+      ]
+    },
+    {
+      "name": "unity-foundations",
+      "mode": "adapted-reference",
+      "scope": "GameObjects, components, transforms, prefabs and scene fundamentals",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Use verified Editor operations for asset wiring and preserve GUIDs. Snapshot examples do not authorize scene transforms or new singleton ownership.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-foundations/references/component-lifecycle.md",
+          "source_sha256": "3ab1729dba4eb0ea0a92b88fe7e0f6c62c997316df12efe55352962705833876",
+          "target": ".codex/skills/unity-foundations/references/component-lifecycle.md",
+          "target_sha256": "78667914a2ae6b3480bb71f34244672a340fde73455833b61418f79ded4f8e3d"
+        },
+        {
+          "source": ".claude/skills/unity-foundations/references/gameobject-api.md",
+          "source_sha256": "c1cb9d02118ab0ee6b91a9cd85ff7360a6178c6ca8f6de54b068da8c0e5d26b7",
+          "target": ".codex/skills/unity-foundations/references/gameobject-api.md",
+          "target_sha256": "a7d8bb392382dd6ce620bc83909d5c32467baca410de2108ed4c6365cab02c10"
+        },
+        {
+          "source": ".claude/skills/unity-foundations/references/prefabs-and-scenes.md",
+          "source_sha256": "f2dc7c516d2f008aa97f7281d399c88350fc4c62929d620acb7fe5fce5218b75",
+          "target": ".codex/skills/unity-foundations/references/prefabs-and-scenes.md",
+          "target_sha256": "71ae1f04abe78332f264f694dacd9f9f25ea614f822b8dacb32ad7f39c49bf3a"
+        },
+        {
+          "source": ".claude/skills/unity-foundations/SKILL.md",
+          "source_sha256": "3f76bd97ae750aea0fbe2292b35cd1b2da4c47c23a81a55f4c6b3a44b735bbed",
+          "target": ".codex/skills/unity-foundations/reference-guide.md",
+          "target_sha256": "e08d3022b279adf096d707510cdb6fb33bf9bfd0662c32118a65087eecefe16a"
+        }
+      ]
+    },
+    {
+      "name": "unity-game-architecture",
+      "mode": "adapted-reference",
+      "scope": "Service ownership, composition, events and bootstrap patterns",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Existing composition and network lifetime win over generic singleton/service-locator/event-bus examples. Read the architecture target before migrations.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-game-architecture/references/architecture-patterns.md",
+          "source_sha256": "a147df900a45e50c912dcb7347f07ada2d556b074fe6ea49fb4df0ab9b469fd0",
+          "target": ".codex/skills/unity-game-architecture/references/architecture-patterns.md",
+          "target_sha256": "de2359185184ba0933380b8d343dd0ce6d07e89552e59f43a6f5574ac7397012"
+        },
+        {
+          "source": ".claude/skills/unity-game-architecture/SKILL.md",
+          "source_sha256": "841f29e45761ff32d2a01f862731ee4e61953761f8fcf13c03ec6c228de2c521",
+          "target": ".codex/skills/unity-game-architecture/reference-guide.md",
+          "target_sha256": "1baa399970351987685012137b164766a238ac5482d49feb5efc6165e0752391"
+        }
+      ]
+    },
+    {
+      "name": "unity-game-loop",
+      "mode": "adapted-reference",
+      "scope": "Session loops, conditions, progression hooks, difficulty and pacing",
+      "existing_specialists": "az-design-trace",
+      "project_notes": "TurnManager remains the sole phase driver. Generic asynchronous loop scaffolds are examples; no mandatory conversion to Awaitable or second loop.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-game-loop/references/game-loop-scaffolds.md",
+          "source_sha256": "55db0e62332694e9ab8fa3069c19ef876d3b1e945bb07a84a7c2a625ab966183",
+          "target": ".codex/skills/unity-game-loop/references/game-loop-scaffolds.md",
+          "target_sha256": "f583d6a5440b0f4d6524f6328c41b0b17d3cf3580c08d905cf9300cbdae847a9"
+        },
+        {
+          "source": ".claude/skills/unity-game-loop/SKILL.md",
+          "source_sha256": "1ed87400598a660c86a4fc3215fc8abc4be2266204bd3f36ed6d5d981f1ce012",
+          "target": ".codex/skills/unity-game-loop/reference-guide.md",
+          "target_sha256": "6dcd487f881216ae73116d82b7bea7480c1448e02de3ad413d4542103d53cd11"
+        }
+      ]
+    },
+    {
+      "name": "unity-graphics",
+      "mode": "adapted-reference",
+      "scope": "URP, HDRP reference, shaders, materials, cameras and Render Graph",
+      "existing_specialists": "validate-urp-render-graph-renderer-feature, shader-graph-create-custom-node",
+      "project_notes": "Use installed URP and renderer settings. HDRP is reference-only unless migration is requested; Render Graph samples require installed-API validation.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-graphics/references/hdrp-guide.md",
+          "source_sha256": "57aa848aabab593c0d1d9468990eaa1fe27dcc8ec60e5c1161c754bf980fd035",
+          "target": ".codex/skills/unity-graphics/references/hdrp-guide.md",
+          "target_sha256": "26267692eabb7426a7e97e33f7c0b06b3011a646609f56a24aea7b3ca408a57a"
+        },
+        {
+          "source": ".claude/skills/unity-graphics/references/materials-textures.md",
+          "source_sha256": "6813a6da3914bcf2ec3597b7c3069c8c21adfeacde1f15e0053e79ba4ee73c48",
+          "target": ".codex/skills/unity-graphics/references/materials-textures.md",
+          "target_sha256": "431ff22e98eef90324038aa1e48cc5db8d469d51997b571b9e54dffbf1657791"
+        },
+        {
+          "source": ".claude/skills/unity-graphics/references/shader-graph.md",
+          "source_sha256": "c5aeea8c3ea81e1e99206faaed1408894ec855c0a8c90ac0993fa4f9ab9ba7e4",
+          "target": ".codex/skills/unity-graphics/references/shader-graph.md",
+          "target_sha256": "06441a0f899f372d3fa3d29d76852703481f361fc4a7f56ae7d98bda60838b14"
+        },
+        {
+          "source": ".claude/skills/unity-graphics/references/urp-guide.md",
+          "source_sha256": "a364944862a1ed9c8ab7624b5a4b08608c1531d771b9b6c163bbf77d9681b6fd",
+          "target": ".codex/skills/unity-graphics/references/urp-guide.md",
+          "target_sha256": "d4ac7a594c34a72f0c036bcee61aabe577d60610bde47a60149fd53ed7f9bdfe"
+        },
+        {
+          "source": ".claude/skills/unity-graphics/SKILL.md",
+          "source_sha256": "f12aa1e0d26e096912239e0aa2a17920ef163a29e40d3a6fa45fa2bc632c8a27",
+          "target": ".codex/skills/unity-graphics/reference-guide.md",
+          "target_sha256": "c7d956333ff018b5506f0e4cfe5b7610ef99da22b854de90d063edb57e5d0945"
+        }
+      ]
+    },
+    {
+      "name": "unity-input",
+      "mode": "adapted-reference",
+      "scope": "Input actions, maps, rebinding, devices, interactions and processors",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Reuse configured Input System actions and ownership. Client input submits validated intent; preserve UI/gameplay map enable/disable lifecycle.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-input/references/input-system-api.md",
+          "source_sha256": "40a4ac2083836bf0a37195f380341bd85156e36cdb9f6d51dd3c4011b0eef45b",
+          "target": ".codex/skills/unity-input/references/input-system-api.md",
+          "target_sha256": "dfaf6adaefb061626da8d2d7779123c1ccee29fdcebefc84ba969f5b709ee0cf"
+        },
+        {
+          "source": ".claude/skills/unity-input/SKILL.md",
+          "source_sha256": "fcc44d4bcb241af16116f5d226611f1a1f2af3a772252fff8604a2ce9d8fbe32",
+          "target": ".codex/skills/unity-input/reference-guide.md",
+          "target_sha256": "d46322578c5bffbfb27e57ac1c6813fc5aebd9782461a977282db5567d20a283"
+        }
+      ]
+    },
+    {
+      "name": "unity-lifecycle",
+      "mode": "adapted-reference",
+      "scope": "Unity null semantics, initialization, event cleanup and destruction",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Network spawn/despawn and round lifetimes supplement MonoBehaviour lifetime. No global replacement of valid lifecycle pairs.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-lifecycle/references/editor-runtime-init.md",
+          "source_sha256": "855894ea998087ccb9bfdd3586e0121e1a38bca4e04f26511c4a3330bd29d450",
+          "target": ".codex/skills/unity-lifecycle/references/editor-runtime-init.md",
+          "target_sha256": "a748d76cafa6f0be1c15ede4c137238feebd9c4a45b710a069cc325d391bf23e"
+        },
+        {
+          "source": ".claude/skills/unity-lifecycle/SKILL.md",
+          "source_sha256": "a2670bfb6d176e900bf01905533b03cedea6b85b6ceac2d166e65d78c4a7db13",
+          "target": ".codex/skills/unity-lifecycle/reference-guide.md",
+          "target_sha256": "8f88d1a44cd6065fa4136a19858bc9ca34a05421bd57750f059b1833756e8932"
+        }
+      ]
+    },
+    {
+      "name": "unity-lighting-vfx",
+      "mode": "adapted-reference",
+      "scope": "Lighting, probes, particles, VFX Graph and effect configuration",
+      "existing_specialists": "urp-postprocessing",
+      "project_notes": "Preserve URP, scene layout and client-only presentation. VFX Graph package availability and renderer compatibility must be checked.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-lighting-vfx/references/lighting-guide.md",
+          "source_sha256": "d769aadec3905ae629a50c6a3381226536cfdb20c70347a26a50119aa7f42853",
+          "target": ".codex/skills/unity-lighting-vfx/references/lighting-guide.md",
+          "target_sha256": "03a07a8e52281b9eb92bd0c52aada94fd50f66246caa20a6c3dfe7380341b3a2"
+        },
+        {
+          "source": ".claude/skills/unity-lighting-vfx/references/particle-system.md",
+          "source_sha256": "975fbc5d868d2ffefee8e9f6c02b0fbcabeb7b282e40ea446ae78b38dcc533ad",
+          "target": ".codex/skills/unity-lighting-vfx/references/particle-system.md",
+          "target_sha256": "4cd9635d35c6591b2aff315043c1aed548fdd1425eee8f9210ea60b3721e06e7"
+        },
+        {
+          "source": ".claude/skills/unity-lighting-vfx/references/vfx-graph.md",
+          "source_sha256": "317760412835b148e0706a58639f78d940d9f960a8a984a92f6b8df07c8250e5",
+          "target": ".codex/skills/unity-lighting-vfx/references/vfx-graph.md",
+          "target_sha256": "24f9241d4e8cc4a37b8a0427b3eb5c81edb7c60bd25bf0ad96c5f5a345ec1ef4"
+        },
+        {
+          "source": ".claude/skills/unity-lighting-vfx/SKILL.md",
+          "source_sha256": "8bcdb7fd7bc5a1a94667873bd7463442721781c4b9642b99b1cab6195a9db24e",
+          "target": ".codex/skills/unity-lighting-vfx/reference-guide.md",
+          "target_sha256": "e68f6c683811e451c2fc65158a67b073656340b78a26c2dcd08299217a9e85ef"
+        }
+      ]
+    },
+    {
+      "name": "unity-npc-behavior",
+      "mode": "adapted-reference",
+      "scope": "Perception, decisions, actions, factions, memory and squad coordination",
+      "existing_specialists": "initialize-ai-navigation",
+      "project_notes": "Retain as optional bot/NPC reference. Do not add bots or alter multiplayer balance without a corresponding design task; server owns decisions affecting shared state.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-npc-behavior/references/npc-system-scaffolds.md",
+          "source_sha256": "39b740cb40832cb41d1eba89f064988737721a2979c12ba91bc2e1774d275f4b",
+          "target": ".codex/skills/unity-npc-behavior/references/npc-system-scaffolds.md",
+          "target_sha256": "88d397f9ed9fa8d8379fb964539ad961b38c5fe435562efba485db79fcf6096d"
+        },
+        {
+          "source": ".claude/skills/unity-npc-behavior/SKILL.md",
+          "source_sha256": "0f940c181046730e9fb965887d921306ba3b439967b0dfb03c140ec7db19b32d",
+          "target": ".codex/skills/unity-npc-behavior/reference-guide.md",
+          "target_sha256": "6c759a01ddf6f38f072ae63f3ef3e9c92c337e91bf1e8d5f48ba15eaa262917c"
+        }
+      ]
+    },
+    {
+      "name": "unity-performance",
+      "mode": "adapted-reference",
+      "scope": "Profiler, memory, CPU, rendering and allocation investigation",
+      "existing_specialists": "optimize-audio, optimize-text-mesh-pro, optimize-web",
+      "project_notes": "Measure before changes; use actual profiler data and target-device evidence. Do not equate every value-type construction or GetComponent call with allocation.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-performance/references/memory-optimization.md",
+          "source_sha256": "b1152f7986138cdc47539937365301425f6bf0c3a67cce4d475aa5059bbc6955",
+          "target": ".codex/skills/unity-performance/references/memory-optimization.md",
+          "target_sha256": "e9c82d26d5daa66c7abc87e7841a4bb7ae6238e1127cf10a16ef3e5421404c2d"
+        },
+        {
+          "source": ".claude/skills/unity-performance/references/profiler-guide.md",
+          "source_sha256": "1d60630fd141413226a591493d60348b05320a9ae19da63b2594314dd3a0c763",
+          "target": ".codex/skills/unity-performance/references/profiler-guide.md",
+          "target_sha256": "879bb4c947d0021c9e6f867176dfb935607ad56d84bf16085555181ffe28f74d"
+        },
+        {
+          "source": ".claude/skills/unity-performance/SKILL.md",
+          "source_sha256": "dcbde00605991785b47461cb88286076810b8e6a9bd8715c94e62744e0aa7b67",
+          "target": ".codex/skills/unity-performance/reference-guide.md",
+          "target_sha256": "7fe1122eeb83de5ffc716731f90a4da0ba10c23fdb9df438ab6e37edbcd35ac2"
+        }
+      ]
+    },
+    {
+      "name": "unity-physics",
+      "mode": "adapted-reference",
+      "scope": "3D and 2D bodies, colliders, triggers, raycasts, joints and controllers",
+      "existing_specialists": "physics-3d-collision",
+      "project_notes": "Identify 3D versus 2D engine first. Account for target-selection trigger colliders, query settings and server authority; adapt legacy Input samples.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-physics/references/character-controller.md",
+          "source_sha256": "17ae98739913dec429a7cee247e3ac5ddd2d0fb7b8acf46d4519b0b30f4af86c",
+          "target": ".codex/skills/unity-physics/references/character-controller.md",
+          "target_sha256": "01635a4d277dd59cf0909e9fc89349d2780b14d5360e1ccc574eae7352d37ca0"
+        },
+        {
+          "source": ".claude/skills/unity-physics/references/physics2d-api.md",
+          "source_sha256": "b7061c5ae5af27acbb6003130413eea483df33b2cfa6d3fee5b372c22ef44a5e",
+          "target": ".codex/skills/unity-physics/references/physics2d-api.md",
+          "target_sha256": "b265793196a80b67890b37184da4f86dcc9f848a860ebeeffe8d35327d83c262"
+        },
+        {
+          "source": ".claude/skills/unity-physics/references/physics3d-api.md",
+          "source_sha256": "2e952ee9d04fc7bc16c9229a04a8921993dc01a1fa9f33249fcdd2e6b4ebca22",
+          "target": ".codex/skills/unity-physics/references/physics3d-api.md",
+          "target_sha256": "d4130e783313349c632ec1bbc0a0319ac1a25f62dee21793001558268ce61469"
+        },
+        {
+          "source": ".claude/skills/unity-physics/SKILL.md",
+          "source_sha256": "d35eec8ab2adad16f52175270b8a80356300d503545bdb19dfb575063776cfa0",
+          "target": ".codex/skills/unity-physics/reference-guide.md",
+          "target_sha256": "1fda85d925d6a7da78f17dd93515c70dfbcc2f20e8e0a9f537da5ba83d99d418"
+        }
+      ]
+    },
+    {
+      "name": "unity-procedural-gen",
+      "mode": "adapted-reference",
+      "scope": "Noise, grids, rooms, seeded generation and content budgets",
+      "existing_specialists": "tilemap-palette-create, tilemap-ruletile-createfromsegment",
+      "project_notes": "Keep optional generation tools separate from current game behavior. Persist explicit deterministic seed hashing; avoid global RNG interference and runtime asset edits.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-procedural-gen/references/procgen-scaffolds.md",
+          "source_sha256": "7d2009e40d523e7dca6fd0a19202e00320ab9468a87445886d8bd4a9a11cc810",
+          "target": ".codex/skills/unity-procedural-gen/references/procgen-scaffolds.md",
+          "target_sha256": "5c7573e49d7e6db181ab653129edae165b7d1352ca20649b6977305c9175008a"
+        },
+        {
+          "source": ".claude/skills/unity-procedural-gen/SKILL.md",
+          "source_sha256": "2eae668985fff4e086a674f387f36fa23c45ffb615eaee9f9a39acc99ba3ed44",
+          "target": ".codex/skills/unity-procedural-gen/reference-guide.md",
+          "target_sha256": "9ce922aaa4012826fb089e093985ce7b086b5c7699191b81a175e8a287ae8bc8"
+        }
+      ]
+    },
+    {
+      "name": "unity-save-system",
+      "mode": "adapted-reference",
+      "scope": "Save DTOs, locations, migrations, atomic writes and cloud synchronization",
+      "existing_specialists": "build-live-game",
+      "project_notes": "Local saves are not authoritative multiplayer state. Cloud/offline/conflict policy must follow the actual product; no automatic serializer/package installation.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-save-system/references/save-load-implementation.md",
+          "source_sha256": "7a98629b84b15da4c2835c00c9cd6f588ee332d238a469adfaf5b199598ec8c2",
+          "target": ".codex/skills/unity-save-system/references/save-load-implementation.md",
+          "target_sha256": "45c137507d0428e758ecf7455060a3c398b37ca3124892f61b499f8e4819c334"
+        },
+        {
+          "source": ".claude/skills/unity-save-system/SKILL.md",
+          "source_sha256": "a5d5a14b7096089dfdb6ea4540fa8fe1302e833e056627f44bda8bca833e3aad",
+          "target": ".codex/skills/unity-save-system/reference-guide.md",
+          "target_sha256": "ababc0d6e03cd92d8d96c332090853ea46e9a5281fdbbe22c0d35fb9d12a3179"
+        }
+      ]
+    },
+    {
+      "name": "unity-scene-assets",
+      "mode": "adapted-reference",
+      "scope": "Scene ownership, loading screens, Resources and Addressables lifetimes",
+      "existing_specialists": "unity-cli, unity-package-management",
+      "project_notes": "Follow NGO scene synchronization and current session ownership; preserve Lobby DDOL scope. Do not migrate Resources or install Addressables incidentally.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-scene-assets/references/addressables-scene-patterns.md",
+          "source_sha256": "0fc0aacc5f59a64bf1e2bfd0f20adcc5218d72382a44cf51735ff52ab76e9929",
+          "target": ".codex/skills/unity-scene-assets/references/addressables-scene-patterns.md",
+          "target_sha256": "3f2ad6b68aaf2869d240d58926998669a4e5aa668e08e0b110474b4de18e23a2"
+        },
+        {
+          "source": ".claude/skills/unity-scene-assets/SKILL.md",
+          "source_sha256": "90b8296383c7e10036a8c25ebb4a6458d78d2ca7be4253ec8d606e77b42c80d2",
+          "target": ".codex/skills/unity-scene-assets/reference-guide.md",
+          "target_sha256": "485e12c6ff9c86d18e45241c5c2a5e0cf1bb9e55625200894ffdc2b192bc9e09"
+        }
+      ]
+    },
+    {
+      "name": "unity-scripting",
+      "mode": "adapted-reference",
+      "scope": "MonoBehaviour, serialization, coroutines, events, pooling and C# idioms",
+      "existing_specialists": "unity-cli",
+      "project_notes": "Adapt examples to AbsoluteZero namespaces, immutable item configuration and network lifecycle. Custom AsTask bridges are not built-in APIs.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-scripting/references/coroutines-and-async.md",
+          "source_sha256": "2af12de5af434a9cd42f86afe115ade739070fabd7f33cbc5e88f20c3821c473",
+          "target": ".codex/skills/unity-scripting/references/coroutines-and-async.md",
+          "target_sha256": "545153b4a33806abfc0930245f8e5d0617b5f78458b53c1c6446e75c92c3442d"
+        },
+        {
+          "source": ".claude/skills/unity-scripting/references/monobehaviour-lifecycle.md",
+          "source_sha256": "d301a68e47bd80497e00fcb3450a85274d1fb249fe615108ff2c54a108e5dfe1",
+          "target": ".codex/skills/unity-scripting/references/monobehaviour-lifecycle.md",
+          "target_sha256": "b7c5ef6ce84db6871956c4e578165766f7db77b79f0b442ceef586bced1c997e"
+        },
+        {
+          "source": ".claude/skills/unity-scripting/references/object-pool.md",
+          "source_sha256": "0ffa479686f6f9c2667709c894832513b079b64c0140a4891d3bcd12931715d3",
+          "target": ".codex/skills/unity-scripting/references/object-pool.md",
+          "target_sha256": "37591b5bd6f707ea16182915283113cff81856de90572ba7c1199a2a4863915e"
+        },
+        {
+          "source": ".claude/skills/unity-scripting/references/scriptableobjects.md",
+          "source_sha256": "a1becd6867ab9295fba0d5e15e71e5acdb35d6e58e18ff2a8a39be7f4ac486a9",
+          "target": ".codex/skills/unity-scripting/references/scriptableobjects.md",
+          "target_sha256": "6244a5c01f7e9b8bb1f8fbe7d2011c4bfe05705843a7e5ea93dba29d3b7ee99e"
+        },
+        {
+          "source": ".claude/skills/unity-scripting/SKILL.md",
+          "source_sha256": "02bfc32f7cc2576b013b841fe78dc66609ad97de3684789ea44791f5a2873a57",
+          "target": ".codex/skills/unity-scripting/reference-guide.md",
+          "target_sha256": "75d626a5ff43ce90fcc3880602600aa3af22aa147ebd99796e965c888da6f7f4"
+        }
+      ]
+    },
+    {
+      "name": "unity-state-machines",
+      "mode": "adapted-reference",
+      "scope": "FSM, hierarchical states, behavior trees, stacks and state testing",
+      "existing_specialists": "az-design-trace",
+      "project_notes": "Use patterns within the requested subsystem; no alternative TurnManager phase owner. Check cancellation/reentry and replicated state boundaries.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-state-machines/references/state-system-scaffolds.md",
+          "source_sha256": "b1cc4372aaf1a6f20c76c09cccc83a6a2a0cbcb2aad097a702415ba62b73c38c",
+          "target": ".codex/skills/unity-state-machines/references/state-system-scaffolds.md",
+          "target_sha256": "c0f8ffd29ef8b264e12aa0d3f535198febbb23c7976ecb2218e8aa26b26718d7"
+        },
+        {
+          "source": ".claude/skills/unity-state-machines/SKILL.md",
+          "source_sha256": "4d57a4a494f902367cd63180050a8a4afb1647daa81230e2a9f4c7c41e820f0e",
+          "target": ".codex/skills/unity-state-machines/reference-guide.md",
+          "target_sha256": "6d0282bee6a1c578c4a902adf3f8cb1bacedc77f87818e01a3d74811f0b47fda"
+        }
+      ]
+    },
+    {
+      "name": "unity-ui",
+      "mode": "adapted-reference",
+      "scope": "uGUI, UI Toolkit, TextMeshPro and data binding references",
+      "existing_specialists": "ui, ui-ugui, ui-uitk, optimize-text-mesh-pro",
+      "project_notes": "Runtime-built uGUI is the established production path. SerializedObject binding is Editor-only; keep UI as observer/intent sender.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-ui/references/textmeshpro.md",
+          "source_sha256": "b77d5e2c7cc730230c1f3356d388946fdeb9f2872460970e3697123dddac534e",
+          "target": ".codex/skills/unity-ui/references/textmeshpro.md",
+          "target_sha256": "c83214866340290328a5d9d4e0160061cccc863e90b1d4085e626247d158eb1e"
+        },
+        {
+          "source": ".claude/skills/unity-ui/references/ugui-legacy.md",
+          "source_sha256": "ef8354611fd2f78cdd0a711c1f83fda8910257b061cd16de85c4ac5718e5b563",
+          "target": ".codex/skills/unity-ui/references/ugui-legacy.md",
+          "target_sha256": "1f9c62fb24b602fb7386eb57d0cc86bcadc9a83bee8e33ee491e67b2ea43131e"
+        },
+        {
+          "source": ".claude/skills/unity-ui/references/ui-data-binding.md",
+          "source_sha256": "95ba9e08dd717f5ac76d914379a0d81eb7b8008c91c3cff1dd46a50df991ac83",
+          "target": ".codex/skills/unity-ui/references/ui-data-binding.md",
+          "target_sha256": "71587eea01f7516637939b08db13d025c6fa7950bc2a111e171c94aa471e550a"
+        },
+        {
+          "source": ".claude/skills/unity-ui/references/ui-toolkit-guide.md",
+          "source_sha256": "59e726425d14f4332407e630d5912385c082f37d2560d41049a314b4b4c49708",
+          "target": ".codex/skills/unity-ui/references/ui-toolkit-guide.md",
+          "target_sha256": "141c1f267c37742de30c784d75ec97d2bc705d65707244a770393d2a04e05122"
+        },
+        {
+          "source": ".claude/skills/unity-ui/SKILL.md",
+          "source_sha256": "dce43856ce045caea3d6b21e520cf453c4ae04190693747cabc76182b10ca9b5",
+          "target": ".codex/skills/unity-ui/reference-guide.md",
+          "target_sha256": "801731b5bc6592ba0336e9f089e174c2fb589f520038a7a93b8ca2ad43261ddf"
+        }
+      ]
+    },
+    {
+      "name": "unity-ui-patterns",
+      "mode": "adapted-reference",
+      "scope": "Screen flow, presenters, HUD, feedback, lists and UI transitions",
+      "existing_specialists": "ui, ui-ugui, ui-uitk",
+      "project_notes": "Reuse current bridges/presenters and lobby flow. UI Toolkit navigation examples do not authorize replacing production uGUI or adding another state owner.",
+      "files": [
+        {
+          "source": ".claude/skills/unity-ui-patterns/references/ui-pattern-scaffolds.md",
+          "source_sha256": "7def098b27565c436aeee46592c6056c0f06e7cd5e0531e62e4c08a4edb39e1e",
+          "target": ".codex/skills/unity-ui-patterns/references/ui-pattern-scaffolds.md",
+          "target_sha256": "78d67f14c9ac76653621758384254a924c87f5a8b56949b4ed71cb84c0cbb7b2"
+        },
+        {
+          "source": ".claude/skills/unity-ui-patterns/SKILL.md",
+          "source_sha256": "61ee12a6e730e8a7790b2ab1f5a4ed9a39cbb7bd26ff78a6c489532da9abfe98",
+          "target": ".codex/skills/unity-ui-patterns/reference-guide.md",
+          "target_sha256": "16eededf79bca2bb8b6ce104c1527d9a8ba7e1429441d394588226e0aa0ce3f9"
+        }
+      ]
+    },
+    {
+      "name": "console-check",
+      "mode": "rewritten-operational",
+      "files": [
+        {
+          "source": ".claude/skills/console-check/SKILL.md",
+          "source_sha256": "75567dc4047b6718fa67f177fd97827b190ef73c38f1c9031169cf9cea776b8b",
+          "target": ".codex/skills/console-check/SKILL.md",
+          "target_sha256": "ed7438a67b4aa48e9fe424d4ee9175778a3e31cbf5cdf49d02082cc1ac18b872"
+        }
+      ]
+    },
+    {
+      "name": "prefab-audit",
+      "mode": "rewritten-operational",
+      "files": [
+        {
+          "source": ".claude/skills/prefab-audit/SKILL.md",
+          "source_sha256": "16c6a8d5f2b32497dae4d85f52223f20a5a48252f0b4a22367ce26babb6bb3ca",
+          "target": ".codex/skills/prefab-audit/SKILL.md",
+          "target_sha256": "ba507fb969e6057977e04b15bc6cfa0ea5fe7a33662cdf2f7e54b5feffa9cf9b"
+        }
+      ]
+    },
+    {
+      "name": "scene-snapshot",
+      "mode": "rewritten-operational",
+      "files": [
+        {
+          "source": ".claude/skills/scene-snapshot/SKILL.md",
+          "source_sha256": "9b255858804edb66bc63672a5f48eb0c8f0aef767704ba4e5ef6a1f7a4669307",
+          "target": ".codex/skills/scene-snapshot/SKILL.md",
+          "target_sha256": "aeb5de2d2a001f091c9e795e31e0794412fe15613cc6616feb9f512909ea2cb1"
+        }
+      ]
+    }
+  ]
+}

@@ -29,19 +29,84 @@ namespace AbsoluteZero.Core.Combat
         public static event System.Action<float, float> OnTempTargetsOverride;
         public static event System.Action<int, float> OnPlayerTempOverride;
         public static event System.Action<int> OnAttackerChanged;
+        public static event System.Action<uint> OnPresentationSettled;
 
         uint _activeSequence;
         bool _sequenceCompleted;
+        Coroutine _multiPresentationQueueRoutine;
+        uint _lastCompletedMultiSequence;
+        readonly Queue<PendingMultiPresentation> _pendingMultiPresentations = new();
+        public bool HasPendingPresentation(uint sequence)
+        {
+            if (!_sequenceCompleted && _activeSequence == sequence) return true;
+            foreach (var pending in _pendingMultiPresentations)
+                if (pending.Sequence == sequence) return true;
+            return false;
+        }
+
+        public void ForceSettleMultiPresentation(uint sequence)
+        {
+            if (!HasPendingPresentation(sequence)) return;
+
+            Debug.LogWarning($"[CombatVFX] Authoritative settlement forced for seq={sequence}");
+            StopAllCoroutines();
+            RestorePresentationCamera();
+            FPSVisualController.Instance?.ReturnToIdle();
+            _multiPresentationQueueRoutine = null;
+            _pendingMultiPresentations.Clear();
+
+            foreach (var visual in FindObjectsByType<AZPlayerVisual>(FindObjectsSortMode.None))
+            {
+                if (visual == null) continue;
+                if (visual.IsGhostTransitionPending || visual.IsDead)
+                    visual.SettleDeathPresentation();
+                else
+                    visual.ReturnToIdle();
+            }
+
+            DestroyTransientPresentationObject("FeedSprite");
+            DestroyTransientPresentationObject("CatAnim");
+            DestroyTransientPresentationObject("CatAnimTemp");
+
+            _activeSequence = sequence;
+            _sequenceCompleted = false;
+            CompletePresentationSequence(sequence);
+            _lastCompletedMultiSequence = sequence;
+        }
+
+        static void DestroyTransientPresentationObject(string objectName)
+        {
+            var transient = GameObject.Find(objectName);
+            if (transient != null) Destroy(transient);
+        }
+
+        struct PendingMultiPresentation
+        {
+            public bool IsCombat;
+            public CombatResolutionBatchNetData Batch;
+            public byte DeathMask;
+            public bool EndsRound;
+            public uint Sequence;
+        }
 
         Transform _hugMovedTransform;
         Vector3 _hugSavedPos;
+        Transform _movedCamera;
+        Vector3 _savedCameraPos;
+
+        void RestorePresentationCamera()
+        {
+            if (_movedCamera != null) _movedCamera.position = _savedCameraPos;
+            _movedCamera = null;
+        }
 
         readonly Dictionary<GameObject, ObjectPool<GameObject>> _particlePools = new();
 
-        void CompletePresentationSequence()
+        void CompletePresentationSequence(uint sequence)
         {
-            if (_sequenceCompleted) return;
+            if (_sequenceCompleted || sequence != _activeSequence) return;
             _sequenceCompleted = true;
+            RestorePresentationCamera();
 
             if (_hugMovedTransform != null)
             {
@@ -60,7 +125,7 @@ namespace AbsoluteZero.Core.Combat
             try { OnAttackerChanged?.Invoke(-1); }
             catch (System.Exception e) { Debug.LogException(e); }
 
-            Debug.Log($"[CombatVFX] Presentation complete: seq={_activeSequence}");
+            Debug.Log($"[CombatVFX] Presentation complete: seq={sequence}");
 
             try
             {
@@ -68,9 +133,11 @@ namespace AbsoluteZero.Core.Combat
                 if (nm != null && nm.IsConnectedClient)
                 {
                     var localPlayer = nm.LocalClient?.PlayerObject?.GetComponent<PlayerState>();
-                    localPlayer?.PresentationAckServerRpc(_activeSequence);
+                    localPlayer?.PresentationAckServerRpc(sequence);
                 }
             }
+            catch (System.Exception e) { Debug.LogException(e); }
+            try { OnPresentationSettled?.Invoke(sequence); }
             catch (System.Exception e) { Debug.LogException(e); }
         }
 
@@ -96,11 +163,29 @@ namespace AbsoluteZero.Core.Combat
         void Start()
         {
             TurnManager.OnCombatResult += OnCombatResult;
+            TurnManager.OnMultiCombatResult += OnMultiCombatResult;
+            TurnManager.OnMultiDeathPresentation += OnMultiDeathPresentation;
         }
 
         void OnDestroy()
         {
+            RestorePresentationCamera();
             TurnManager.OnCombatResult -= OnCombatResult;
+            TurnManager.OnMultiCombatResult -= OnMultiCombatResult;
+            TurnManager.OnMultiDeathPresentation -= OnMultiDeathPresentation;
+            _pendingMultiPresentations.Clear();
+            if (!_sequenceCompleted)
+            {
+                try { InventoryPresenter.Instance?.UnlockRebuild(); }
+                catch (System.Exception e) { Debug.LogException(e); }
+                try { OnTempOverridesClear?.Invoke(); }
+                catch (System.Exception e) { Debug.LogException(e); }
+            }
+            if (_hugMovedTransform != null)
+            {
+                _hugMovedTransform.position = _hugSavedPos;
+                _hugMovedTransform = null;
+            }
             foreach (var pool in _particlePools.Values)
                 pool.Dispose();
             _particlePools.Clear();
@@ -111,6 +196,102 @@ namespace AbsoluteZero.Core.Combat
         {
             Debug.Log($"[CombatVFX] OnCombatResult received — winner={result.WinnerIndex}, firstIdx={result.FirstPlayerIndex}, P1Main={result.P1MainItemId}, P2Main={result.P2MainItemId}");
             StartCoroutine(PlayCombatVFXSequence(result));
+        }
+
+        void OnMultiCombatResult(CombatResolutionBatchNetData batch)
+        {
+            Debug.Log($"[CombatVFX] OnMultiCombatResult received — seats={batch.SeatCount}, events={batch.EventCount}, seq={batch.ResultSequence}");
+            EnqueueMultiPresentation(new PendingMultiPresentation
+            {
+                IsCombat = true,
+                Batch = batch,
+                Sequence = batch.ResultSequence
+            });
+        }
+
+        void OnMultiDeathPresentation(byte deathMask, bool endsRound, uint presentationId)
+        {
+            Debug.Log($"[CombatVFX] OnMultiDeathPresentation — deathMask={deathMask:X2}, endsRound={endsRound}, seq={presentationId}");
+            EnqueueMultiPresentation(new PendingMultiPresentation
+            {
+                DeathMask = deathMask,
+                EndsRound = endsRound,
+                Sequence = presentationId
+            });
+        }
+
+        void EnqueueMultiPresentation(PendingMultiPresentation pending)
+        {
+            if (!_sequenceCompleted && _activeSequence == pending.Sequence) return;
+            if (!_sequenceCompleted && pending.Sequence < _activeSequence)
+            {
+                Debug.LogWarning($"[CombatVFX] Stale presentation ignored: seq={pending.Sequence}, active={_activeSequence}");
+                return;
+            }
+            if (pending.Sequence <= _lastCompletedMultiSequence)
+            {
+                SendPresentationAck(pending.Sequence);
+                return;
+            }
+            if (_pendingMultiPresentations.Count >= 8)
+            {
+                Debug.LogError($"[CombatVFX] Presentation queue overflow at seq={pending.Sequence}; server timeout reconciliation required");
+                return;
+            }
+            foreach (var queued in _pendingMultiPresentations)
+                if (queued.Sequence == pending.Sequence) return;
+            _pendingMultiPresentations.Enqueue(pending);
+            if (_multiPresentationQueueRoutine == null)
+                _multiPresentationQueueRoutine = StartCoroutine(DrainMultiPresentationQueue());
+        }
+
+        IEnumerator DrainMultiPresentationQueue()
+        {
+            while (_pendingMultiPresentations.Count > 0)
+            {
+                var pending = _pendingMultiPresentations.Dequeue();
+                _activeSequence = pending.Sequence;
+                _sequenceCompleted = false;
+                if (pending.IsCombat)
+                    yield return StartCoroutine(PlayMultiCombatVFXSequence(pending.Batch));
+                else
+                    yield return StartCoroutine(PlayMultiDeathSequence(
+                        pending.DeathMask, pending.EndsRound, pending.Sequence));
+                _lastCompletedMultiSequence = pending.Sequence;
+            }
+            _multiPresentationQueueRoutine = null;
+        }
+
+        static void SendPresentationAck(uint sequence)
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm == null || !nm.IsConnectedClient) return;
+            var localPlayer = nm.LocalClient?.PlayerObject?.GetComponent<PlayerState>();
+            localPlayer?.PresentationAckServerRpc(sequence);
+        }
+
+        IEnumerator PlayMultiDeathSequence(byte deathMask, bool endsRound, uint presentationId)
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm == null)
+            {
+                CompletePresentationSequence(presentationId);
+                yield break;
+            }
+
+            var runningAnims = new List<Coroutine>();
+            for (byte seat = 0; seat < 8; seat++)
+            {
+                if ((deathMask & (1 << seat)) == 0) continue;
+                var visual = GetPlayerVisual(seat, nm);
+                if (visual != null)
+                    runningAnims.Add(visual.PlayDeathSequenceAndWait(endsRound));
+            }
+
+            foreach (var anim in runningAnims)
+                yield return anim;
+
+            CompletePresentationSequence(presentationId);
         }
 
         IEnumerator PlayCombatVFXSequence(CombatResultData result)
@@ -136,6 +317,12 @@ namespace AbsoluteZero.Core.Combat
                 short firstItemId = firstIdx == 0 ? result.P1MainItemId : result.P2MainItemId;
                 short secondItemId = secondIdx == 0 ? result.P1MainItemId : result.P2MainItemId;
 
+                // Defense is presented by the incoming attack, never as a separate turn.
+                if (ItemManager.Instance?.GetItemData(firstItemId)?.Category == ItemCategory.Defense)
+                    firstItemId = -1;
+                if (ItemManager.Instance?.GetItemData(secondItemId)?.Category == ItemCategory.Defense)
+                    secondItemId = -1;
+
                 int deadIdx = result.WinnerIndex >= 0 ? 1 - result.WinnerIndex : -1;
                 bool firstActionKilled = result.WinnerIndex >= 0
                     && result.EventCount == 1
@@ -148,16 +335,13 @@ namespace AbsoluteZero.Core.Combat
 
                 Debug.Log($"[CombatVFX] Sequence seq={_activeSequence}: first=P{firstIdx}(item={firstItemId}), second=P{secondIdx}(item={secondItemId}), deadIdx={deadIdx}");
 
-                var firstItemData = firstItemId >= 0 ? ItemManager.Instance?.GetItemData(firstItemId) : null;
-                var secondItemData = secondItemId >= 0 ? ItemManager.Instance?.GetItemData(secondItemId) : null;
-                bool secondIsDefending = secondItemData != null && secondItemData.Category == ItemCategory.Defense;
-                bool firstIsDefending = firstItemData != null && firstItemData.Category == ItemCategory.Defense;
-
                 if (firstItemId >= 0)
                 {
-                    Debug.Log($"[CombatVFX] Playing FIRST item sequence: P{firstIdx} item={firstItemId}, targetDefending={secondIsDefending}");
+                    GetImpactData(result, firstIdx, out byte impactFlags, out short defenseItemId);
+                    Debug.Log($"[CombatVFX] Playing FIRST item sequence: P{firstIdx} item={firstItemId}, flags={impactFlags}");
                     OnAttackerChanged?.Invoke(firstIdx);
-                    yield return StartCoroutine(PlayItemSequence(firstIdx, firstItemId, nm, secondIsDefending, result));
+                    yield return StartCoroutine(PlayItemSequence(firstIdx, firstItemId, nm,
+                        impactFlags, defenseItemId, result));
                 }
 
                 if (firstActionKilled && deadIdx >= 0)
@@ -174,9 +358,11 @@ namespace AbsoluteZero.Core.Combat
 
                 if (secondItemId >= 0)
                 {
-                    Debug.Log($"[CombatVFX] Playing SECOND item sequence: P{secondIdx} item={secondItemId}, targetDefending={firstIsDefending}");
+                    GetImpactData(result, secondIdx, out byte impactFlags, out short defenseItemId);
+                    Debug.Log($"[CombatVFX] Playing SECOND item sequence: P{secondIdx} item={secondItemId}, flags={impactFlags}");
                     OnAttackerChanged?.Invoke(secondIdx);
-                    yield return StartCoroutine(PlayItemSequence(secondIdx, secondItemId, nm, firstIsDefending, result));
+                    yield return StartCoroutine(PlayItemSequence(secondIdx, secondItemId, nm,
+                        impactFlags, defenseItemId, result));
                 }
 
                 if (!firstActionKilled && deadIdx >= 0)
@@ -199,11 +385,342 @@ namespace AbsoluteZero.Core.Combat
             }
             finally
             {
-                CompletePresentationSequence();
+                CompletePresentationSequence(result.ResultSequence);
             }
         }
 
-        IEnumerator PlayItemSequence(int userIdx, short itemId, NetworkManager nm, bool targetDefending, CombatResultData result)
+        IEnumerator PlayMultiCombatVFXSequence(CombatResolutionBatchNetData batch)
+        {
+            _activeSequence = batch.ResultSequence;
+            _sequenceCompleted = false;
+            IsPlaying = true;
+
+            try { InventoryPresenter.Instance?.LockRebuild(); }
+            catch (System.Exception e) { Debug.LogException(e); }
+
+            try
+            {
+                for (int s = 0; s < batch.SeatCount; s++)
+                    OnPlayerTempOverride?.Invoke(s, batch.TempBefore[s]);
+
+                var nm = NetworkManager.Singleton;
+                if (nm == null) yield break;
+
+                var deathShown = new HashSet<byte>();
+
+                yield return _waitIntro;
+
+                for (int orderIdx = 0; orderIdx < batch.SeatCount; orderIdx++)
+                {
+                    int actorSeat = batch.ActionOrder[orderIdx];
+                    short mainItemId = batch.MainItemIds[actorSeat];
+
+                    var mainEffects = new List<CombatEventNetData>();
+                    var deathEvents = new List<CombatEventNetData>();
+                    for (int e = 0; e < batch.EventCount; e++)
+                    {
+                        var evt = batch.Events[e];
+                        if (evt.ActorSeat != actorSeat) continue;
+                        if ((CombatEventType)evt.EventType == CombatEventType.Death)
+                            deathEvents.Add(evt);
+                        else if ((CombatEventType)evt.EventType == CombatEventType.MainEffect
+                            || (CombatEventType)evt.EventType == CombatEventType.DefenseActivated)
+                            mainEffects.Add(evt);
+                    }
+
+                    bool actionExecuted = mainEffects.Count > 0;
+                    if (!actionExecuted) continue;
+
+                    OnAttackerChanged?.Invoke(actorSeat);
+                    Debug.Log($"[CombatVFX-Multi] Action {orderIdx}: P{actorSeat} item={mainItemId} effects={mainEffects.Count} deaths={deathEvents.Count}");
+
+                    float actionStart = Time.time;
+                    yield return StartCoroutine(PlayMultiItemSequence(
+                        actorSeat, mainItemId, nm, mainEffects));
+
+                    float actionPad = MIN_ACTION_DURATION - (Time.time - actionStart);
+                    if (actionPad > 0f)
+                        yield return new WaitForSeconds(actionPad);
+
+                    foreach (var dEvt in deathEvents)
+                    {
+                        byte tgt = dEvt.TargetSeat;
+                        if (deathShown.Contains(tgt)) continue;
+                        var deadVisual = GetPlayerVisual(tgt, nm);
+                        if (deadVisual == null) continue;
+                        deathShown.Add(tgt);
+                        bool endsMatch = batch.MatchWinnerMask != 0;
+                        yield return deadVisual.PlayDeathSequenceAndWait(endsMatch);
+                    }
+
+                    bool anyDeath = deathEvents.Count > 0;
+                    if (orderIdx < batch.SeatCount - 1 && !anyDeath)
+                        yield return _waitBriefPause;
+                }
+
+            }
+            finally
+            {
+                for (int s = 0; s < batch.SeatCount; s++)
+                {
+                    try { OnPlayerTempOverride?.Invoke(s, batch.TempAfter[s]); }
+                    catch (System.Exception e) { Debug.LogException(e); }
+                }
+
+                CompletePresentationSequence(batch.ResultSequence);
+            }
+        }
+
+        IEnumerator PlayMultiItemSequence(int actorSeat, short itemId, NetworkManager nm,
+            List<CombatEventNetData> mainEffects)
+        {
+            var itemData = itemId >= 0 ? ItemManager.Instance?.GetItemData(itemId) : null;
+            var actorVisual = GetPlayerVisual(actorSeat, nm);
+
+            if (itemData == null || actorVisual == null) yield break;
+
+            bool isLocalUser = actorVisual.IsOwner;
+            bool isAttack = itemData.Category == ItemCategory.Attack;
+            bool isRecovery = itemData.Category == ItemCategory.Recovery;
+            int targetSeat = mainEffects.Count > 0 ? mainEffects[0].TargetSeat : actorSeat;
+            var targetVisual = GetPlayerVisual(targetSeat, nm);
+
+            if (isLocalUser && itemData.Category == ItemCategory.Buff)
+                ScreenVFXManager.Instance.PlayRecoveryVFX();
+
+            string userTrigger = isLocalUser
+                ? itemData.AnimTrigger
+                : (!string.IsNullOrEmpty(itemData.OpponentAnimTrigger) ? itemData.OpponentAnimTrigger : itemData.AnimTrigger);
+
+            bool fullyBlocked = mainEffects.Count > 0;
+            foreach (var evt in mainEffects)
+                fullyBlocked &= IsFullyBlockedImpact(evt.Flags);
+            System.Action impact = () =>
+            {
+                ApplyMultiEventTemps(mainEffects);
+                PlayMultiImpactReactions(actorSeat, isAttack, isRecovery,
+                    isLocalUser, 0, mainEffects, nm);
+            };
+
+            if (itemData.ItemName == "Hug T-shirt")
+            {
+                GameAudioManager.Instance?.PlayItemSfx(itemData.AnimTrigger, itemData.ItemName);
+                yield return StartCoroutine(PlayHugSequence(actorSeat, targetSeat,
+                    actorVisual, targetVisual, isLocalUser, !isLocalUser, impact, !fullyBlocked));
+                actorVisual.ReturnToIdle();
+                targetVisual?.ReturnToIdle();
+                FPSVisualController.Instance?.ReturnToIdle();
+                yield break;
+            }
+
+            bool isFeed = itemData.ItemName == "Samgyetang"
+                || itemData.ItemName == "Ice Cream" || itemData.ItemName == "Iced Americano";
+            if (isFeed && !fullyBlocked && targetVisual != null)
+            {
+                if (!isLocalUser) actorVisual.PlayCombatAnimation(userTrigger);
+                if (isLocalUser)
+                    FPSVisualController.Instance?.PlayFPSAnimation(itemData.AnimTrigger, itemData.ItemName);
+                GameAudioManager.Instance?.PlayItemSfx(itemData.AnimTrigger, itemData.ItemName);
+                yield return StartCoroutine(PlayFeedReaction(targetVisual, targetSeat, itemData.ItemName, impact));
+                actorVisual.ReturnToIdle();
+                FPSVisualController.Instance?.ReturnToIdle();
+                yield break;
+            }
+
+            if (string.IsNullOrEmpty(userTrigger))
+            {
+                if (itemData.ItemName == "Cat")
+                {
+                    float catMinDur = itemData.AnimDuration > 0f
+                        ? itemData.AnimDuration
+                        : MIN_ACTION_DURATION;
+                    yield return StartCoroutine(PlayCatSpriteSequence(
+                        actorSeat, targetSeat, isLocalUser, catMinDur, impact));
+                    yield break;
+                }
+                ApplyMultiEventTemps(mainEffects);
+                int fallbackHits = Mathf.Max(1, itemData.EffectHitCount);
+                for (int h = 0; h < fallbackHits; h++)
+                {
+                    PlayMultiImpactReactions(actorSeat, isAttack, isRecovery,
+                        isLocalUser, h, mainEffects, nm);
+                    if (h < fallbackHits - 1 && itemData.EffectInterval > 0f)
+                        yield return new WaitForSeconds(itemData.EffectInterval);
+                }
+                yield break;
+            }
+
+            if (!isLocalUser)
+            {
+                var itemSprite = GameSprites.GetItemSprite(itemData.ItemName);
+                actorVisual.SetItemSprite(itemSprite);
+            }
+
+            actorVisual.PlayCombatAnimation(userTrigger);
+            GameAudioManager.Instance?.PlayItemSfx(itemData.AnimTrigger, itemData.ItemName);
+
+            if (isLocalUser)
+            {
+                var fps = FPSVisualController.Instance;
+                if (fps != null) fps.PlayFPSAnimation(itemData.AnimTrigger, itemData.ItemName);
+            }
+
+            float animLen = GetAnimDuration(itemData, actorVisual.GetAnimator(), userTrigger);
+
+            if (itemData.EffectHitCount > 0 && itemData.EffectDelay > 0f)
+            {
+                yield return new WaitForSeconds(itemData.EffectDelay);
+                ApplyMultiEventTemps(mainEffects);
+                float remaining = animLen - itemData.EffectDelay;
+
+                for (int h = 0; h < itemData.EffectHitCount; h++)
+                {
+                    PlayMultiImpactReactions(actorSeat, isAttack, isRecovery,
+                        isLocalUser, h, mainEffects, nm);
+
+                    if (h < itemData.EffectHitCount - 1 && itemData.EffectInterval > 0f)
+                    {
+                        yield return new WaitForSeconds(itemData.EffectInterval);
+                        remaining -= itemData.EffectInterval;
+                    }
+                }
+
+                if (remaining > 0f)
+                    yield return new WaitForSeconds(remaining);
+            }
+            else
+            {
+                float firstHalf = animLen * 0.5f;
+                if (firstHalf > 0f)
+                    yield return new WaitForSeconds(firstHalf);
+                ApplyMultiEventTemps(mainEffects);
+                PlayMultiImpactReactions(actorSeat, isAttack, isRecovery,
+                    isLocalUser, 0, mainEffects, nm);
+                float secondHalf = animLen - firstHalf;
+                if (secondHalf > 0f)
+                    yield return new WaitForSeconds(secondHalf);
+            }
+
+            actorVisual.ReturnToIdle();
+            if (isLocalUser)
+            {
+                var fps = FPSVisualController.Instance;
+                if (fps != null) fps.ReturnToIdle();
+            }
+
+            foreach (var evt in mainEffects)
+            {
+                if ((evt.Flags & CombatImpactFlags.Defense) == 0) continue;
+                var defendedVisual = GetPlayerVisual(evt.TargetSeat, nm);
+                defendedVisual?.ReturnToIdle();
+                if (defendedVisual != null && defendedVisual.IsOwner)
+                    FPSVisualController.Instance?.ReturnToIdle();
+            }
+
+            string itemName = itemData.ItemName;
+            if (itemName == "Red Card" && targetVisual != null)
+            {
+                targetVisual.PlayCombatAnimation("disappoint");
+                yield return _waitDamageReact;
+                targetVisual.ReturnToIdle();
+            }
+        }
+
+        void ApplyMultiEventTemps(List<CombatEventNetData> events)
+        {
+            foreach (var evt in events)
+            {
+                OnPlayerTempOverride?.Invoke(evt.ActorSeat, evt.ActorResultTemp);
+                OnPlayerTempOverride?.Invoke(evt.TargetSeat, evt.TargetResultTemp);
+            }
+        }
+
+        void PlayMultiImpactReactions(int actorSeat, bool isAttack, bool isRecovery,
+            bool isLocalUser, int hitIndex, List<CombatEventNetData> events,
+            NetworkManager nm)
+        {
+            foreach (var evt in events)
+            {
+                int targetSeat = evt.TargetSeat;
+                if (targetSeat == actorSeat) continue;
+                var targetVisual = GetPlayerVisual(targetSeat, nm);
+                if (targetVisual == null) continue;
+
+                bool targetDefending = (evt.Flags & CombatImpactFlags.Defense) != 0;
+                bool targetDamaged = (evt.Flags & CombatImpactFlags.Damage) != 0;
+                if (!isAttack && !targetDefending && !targetDamaged) continue;
+
+                if (targetDefending && hitIndex == 0)
+                    PlayDefenseReaction(targetVisual, evt.DefenseItemId);
+                if (!targetDamaged) continue;
+
+                targetVisual.PlayDamageFlash(preserveCombatAnimation: targetDefending);
+                if (!isLocalUser)
+                {
+                    PlayHitAt(GetPlayerWorldPos(targetSeat));
+                    if (hitIndex == 0)
+                    {
+                        if (targetVisual.IsOwner)
+                            CameraShake.Instance?.Shake(0.15f, 0.1f);
+                        PlayIceBreakAt(GetPlayerWorldPos(targetSeat));
+                    }
+                }
+                GameAudioManager.Instance?.PlayDamaged();
+            }
+
+            if (isRecovery && isLocalUser)
+            {
+                PlayHitAt(GetPlayerWorldPos(actorSeat));
+                if (hitIndex == 0) ScreenVFXManager.Instance.PlayRecoveryVFX();
+            }
+        }
+
+        void PlayDefenseReaction(AZPlayerVisual targetVisual, short defenseItemId)
+        {
+            if (targetVisual == null) return;
+
+            var defenseItem = defenseItemId >= 0
+                ? ItemManager.Instance?.GetItemData(defenseItemId)
+                : null;
+            string trigger = targetVisual.IsOwner
+                ? defenseItem?.AnimTrigger
+                : (!string.IsNullOrEmpty(defenseItem?.OpponentAnimTrigger)
+                    ? defenseItem.OpponentAnimTrigger
+                    : defenseItem?.AnimTrigger);
+            if (string.IsNullOrEmpty(trigger)) trigger = "defence";
+
+            if (!targetVisual.IsOwner)
+                targetVisual.PrepareDefenseSprite(!string.IsNullOrEmpty(defenseItem?.ItemName)
+                    ? GameSprites.GetItemSprite(defenseItem.ItemName) : null);
+            targetVisual.PlayCombatAnimation(trigger);
+            GameAudioManager.Instance?.PlayItemSfx(trigger, defenseItem?.ItemName);
+            if (targetVisual.IsOwner)
+                FPSVisualController.Instance?.PlayFPSAnimation(trigger, defenseItem?.ItemName);
+        }
+
+        public static bool IsFullyBlockedImpact(byte flags)
+            => (flags & CombatImpactFlags.Defense) != 0
+                && (flags & (CombatImpactFlags.Damage | CombatImpactFlags.Recovery)) == 0;
+
+        static void GetImpactData(CombatResultData result, int actorSeat,
+            out byte flags, out short defenseItemId)
+        {
+            flags = 0;
+            defenseItemId = -1;
+            if (result.EventCount > 0 && result.Event0Source == actorSeat)
+            {
+                flags = result.Event0ImpactFlags;
+                defenseItemId = result.Event0DefenseItemId;
+            }
+            else if (result.EventCount > 1 && result.Event1Source == actorSeat)
+            {
+                flags = result.Event1ImpactFlags;
+                defenseItemId = result.Event1DefenseItemId;
+            }
+        }
+
+        IEnumerator PlayItemSequence(int userIdx, short itemId, NetworkManager nm,
+            byte impactFlags, short defenseItemId, CombatResultData result)
         {
             var itemData = ItemManager.Instance?.GetItemData(itemId);
             if (itemData == null)
@@ -219,10 +736,13 @@ namespace AbsoluteZero.Core.Combat
             bool isAttack = itemData.Category == ItemCategory.Attack;
             bool isRecovery = itemData.Category == ItemCategory.Recovery;
             bool isLocalUser = userVisual != null && userVisual.IsOwner;
+            bool targetDefending = (impactFlags & CombatImpactFlags.Defense) != 0;
+            bool targetDamaged = (impactFlags & CombatImpactFlags.Damage) != 0;
+            bool fullyBlocked = IsFullyBlockedImpact(impactFlags);
 
             if (isLocalUser && itemData.Category == ItemCategory.Buff)
                 ScreenVFXManager.Instance.PlayRecoveryVFX();
-            else if (!isLocalUser && itemData.Category == ItemCategory.Debuff)
+            else if (!isLocalUser && itemData.Category == ItemCategory.Debuff && targetDamaged)
                 ScreenVFXManager.Instance.PlayHitVFX();
 
             string userTrigger = isLocalUser
@@ -267,16 +787,15 @@ namespace AbsoluteZero.Core.Combat
 
                     for (int h = 0; h < itemData.EffectHitCount; h++)
                     {
-                        if (isAttack && targetVisual != null)
+                        if ((isAttack || targetDefending) && targetVisual != null)
                         {
-                            if (targetDefending)
+                            if (targetDefending && h == 0)
                             {
-                                if (h == 0)
-                                    targetVisual.PlayCombatAnimation("defence");
+                                PlayDefenseReaction(targetVisual, defenseItemId);
                             }
-                            else
+                            if (targetDamaged)
                             {
-                                targetVisual.PlayDamageFlash();
+                                targetVisual.PlayDamageFlash(preserveCombatAnimation: targetDefending);
                                 if (!isLocalUser)
                                 {
                                     PlayHitAt(GetPlayerWorldPos(targetIdx));
@@ -313,6 +832,23 @@ namespace AbsoluteZero.Core.Combat
                 {
                     yield return new WaitForSeconds(animLen * 0.5f);
                     ApplyEventTemps(userIdx, result);
+                    if ((isAttack || targetDefending) && targetVisual != null)
+                    {
+                        if (targetDefending)
+                            PlayDefenseReaction(targetVisual, defenseItemId);
+                        if (targetDamaged)
+                        {
+                            targetVisual.PlayDamageFlash(preserveCombatAnimation: targetDefending);
+                            if (!isLocalUser)
+                            {
+                                PlayHitAt(GetPlayerWorldPos(targetIdx));
+                                ScreenVFXManager.Instance.PlayHitVFX();
+                                CameraShake.Instance?.Shake(0.15f, 0.1f);
+                                PlayIceBreakAt(GetPlayerWorldPos(targetIdx));
+                            }
+                            GameAudioManager.Instance?.PlayDamaged();
+                        }
+                    }
                     yield return new WaitForSeconds(animLen * 0.5f);
                 }
 
@@ -325,7 +861,11 @@ namespace AbsoluteZero.Core.Combat
                 }
 
                 if (targetDefending && targetVisual != null)
+                {
                     targetVisual.ReturnToIdle();
+                    if (targetVisual.IsOwner)
+                        FPSVisualController.Instance?.ReturnToIdle();
+                }
 
                 if (itemData.ItemName == "Screwdriver" && targetVisual != null)
                     TintTargetFanBlue(targetVisual);
@@ -336,18 +876,19 @@ namespace AbsoluteZero.Core.Combat
                 float catMinDur = itemData.AnimDuration > 0f ? itemData.AnimDuration : 1.5f;
                 yield return StartCoroutine(PlayCatSpriteSequence(userIdx, targetIdx, isLocalUser, catMinDur));
             }
-            else if ((isAttack || isRecovery) && itemData.EffectHitCount > 0)
+            else if ((isAttack || isRecovery || targetDefending) &&
+                (itemData.EffectHitCount > 0 || targetDefending))
             {
                 ApplyEventTemps(userIdx, result);
-                if (isAttack && targetVisual != null)
+                if ((isAttack || targetDefending) && targetVisual != null)
                 {
                     if (targetDefending)
                     {
-                        targetVisual.PlayCombatAnimation("defence");
+                        PlayDefenseReaction(targetVisual, defenseItemId);
                     }
-                    else
+                    if (targetDamaged)
                     {
-                        targetVisual.PlayDamageFlash();
+                        targetVisual.PlayDamageFlash(preserveCombatAnimation: targetDefending);
                         if (!isLocalUser)
                         {
                             PlayHitAt(GetPlayerWorldPos(targetIdx));
@@ -368,14 +909,18 @@ namespace AbsoluteZero.Core.Combat
                 }
                 yield return _waitDamageReact;
                 if (targetDefending && targetVisual != null)
+                {
                     targetVisual.ReturnToIdle();
+                    if (targetVisual.IsOwner)
+                        FPSVisualController.Instance?.ReturnToIdle();
+                }
             }
 
             bool isTargetOpponent = isLocalUser;
             string itemName = itemData.ItemName;
 
             if ((itemName == "Samgyetang" || itemName == "Ice Cream" || itemName == "Iced Americano")
-                && targetVisual != null && !isTargetOpponent)
+                && !fullyBlocked && targetVisual != null && !isTargetOpponent)
             {
                 yield return StartCoroutine(PlayFeedReaction(targetVisual, targetIdx, itemName));
             }
@@ -460,7 +1005,8 @@ namespace AbsoluteZero.Core.Combat
             return info.length > 0f ? info.length : 0.8f;
         }
 
-        IEnumerator PlayCatSpriteSequence(int userIdx, int targetIdx, bool isLocalUser, float minDuration = 1.5f)
+        IEnumerator PlayCatSpriteSequence(int userIdx, int targetIdx, bool isLocalUser, float minDuration = 1.5f,
+            System.Action onImpact = null)
         {
             float startTime = Time.time;
             Debug.Log($"[CombatVFX] Cat sequence START — user=P{userIdx} target=P{targetIdx} isLocal={isLocalUser} minDur={minDuration}s");
@@ -479,10 +1025,11 @@ namespace AbsoluteZero.Core.Combat
             {
                 Debug.LogWarning("[CombatVFX] Cat sprites not found — waiting minDuration");
                 yield return new WaitForSeconds(minDuration);
+                onImpact?.Invoke();
                 yield break;
             }
 
-            Transform catItemTransform = isLocalUser ? FindCatItemView() : null;
+            Transform catItemTransform = isLocalUser && onImpact == null ? FindCatItemView() : null;
             SpriteRenderer sr;
             GameObject go;
             Vector3 originalScale;
@@ -497,6 +1044,7 @@ namespace AbsoluteZero.Core.Combat
                 {
                     Debug.LogWarning("[CombatVFX] Cat item SpriteRenderer not found — waiting minDuration");
                     yield return new WaitForSeconds(minDuration);
+                    onImpact?.Invoke();
                     yield break;
                 }
                 originalScale = go.transform.localScale;
@@ -547,7 +1095,7 @@ namespace AbsoluteZero.Core.Combat
 
             string destMarkerPrefix = isLocalUser ? "EnemyItem" : "PlayerItem";
             int randomIdx = Random.Range(1, 9);
-            var destMarker = GameObject.Find($"{destMarkerPrefix}{randomIdx}");
+            var destMarker = onImpact == null ? GameObject.Find($"{destMarkerPrefix}{randomIdx}") : null;
             Vector3 destPos = destMarker != null
                 ? destMarker.transform.position
                 : GetPlayerWorldPos(targetIdx) + new Vector3(0f, 0.3f, 0f);
@@ -570,6 +1118,7 @@ namespace AbsoluteZero.Core.Combat
                 yield return null;
             }
             go.transform.position = destPos;
+            onImpact?.Invoke();
 
             if (catItemTransform != null)
             {
@@ -585,7 +1134,7 @@ namespace AbsoluteZero.Core.Combat
                 catItemTransform = null;
             }
 
-            InventoryPresenter.Instance?.UnlockRebuild();
+            if (onImpact == null) InventoryPresenter.Instance?.UnlockRebuild();
 
             sr.sprite = spRummage;
 
@@ -780,13 +1329,17 @@ namespace AbsoluteZero.Core.Combat
                 }
             }
 
-            var sp = GameObject.Find(playerIndex == 0 ? "SpawnPoint_1" : "SpawnPoint_2");
+            var sp = GameObject.Find($"SpawnPoint_{playerIndex + 1}");
             return sp != null ? sp.transform.position + Vector3.up * 1.5f : Vector3.zero;
         }
 
-        IEnumerator PlayFeedReaction(AZPlayerVisual targetVisual, int targetIdx, string itemName)
+        IEnumerator PlayFeedReaction(AZPlayerVisual targetVisual, int targetIdx, string itemName,
+            System.Action onImpact = null)
         {
-            targetVisual.PlayCombatAnimation("feed");
+            if (onImpact != null && targetVisual.IsOwner)
+                FPSVisualController.Instance?.PlayFPSAnimation("feed", itemName);
+            else
+                targetVisual.PlayCombatAnimation("feed");
 
             var sprite = GameSprites.GetItemSprite(itemName);
             GameObject feedSpriteGO = null;
@@ -801,15 +1354,19 @@ namespace AbsoluteZero.Core.Combat
             }
 
             yield return _waitFeedHalf;
+            onImpact?.Invoke();
             yield return _waitFeedHalf;
 
             if (feedSpriteGO != null) Destroy(feedSpriteGO);
             targetVisual.ReturnToIdle();
+            if (onImpact != null && targetVisual.IsOwner)
+                FPSVisualController.Instance?.ReturnToIdle();
         }
 
         IEnumerator PlayHugSequence(int userIdx, int targetIdx,
             AZPlayerVisual userVisual, AZPlayerVisual targetVisual,
-            bool isLocalUser, bool isTargetOpponent)
+            bool isLocalUser, bool isTargetOpponent, System.Action onImpact = null,
+            bool contactAllowed = true)
         {
             if (isLocalUser)
             {
@@ -817,6 +1374,8 @@ namespace AbsoluteZero.Core.Combat
                 if (cam != null)
                 {
                     var startPos = cam.transform.position;
+                    _movedCamera = cam.transform;
+                    _savedCameraPos = startPos;
                     var targetPos = GetPlayerWorldPos(targetIdx);
                     var approachPos = Vector3.Lerp(startPos, targetPos, 0.4f);
 
@@ -828,6 +1387,9 @@ namespace AbsoluteZero.Core.Combat
                         yield return null;
                     }
 
+                    if (onImpact != null && contactAllowed)
+                        FPSVisualController.Instance?.PlayFPSAnimation("hug", "Hug T-shirt");
+                    onImpact?.Invoke();
                     yield return _waitHug03;
 
                     t = 0f;
@@ -838,7 +1400,9 @@ namespace AbsoluteZero.Core.Combat
                         yield return null;
                     }
                     cam.transform.position = startPos;
+                    _movedCamera = null;
                 }
+                else onImpact?.Invoke();
             }
 
             if (isTargetOpponent && userVisual != null)
@@ -861,7 +1425,8 @@ namespace AbsoluteZero.Core.Combat
                     yield return null;
                 }
 
-                userVisual.PlayCombatAnimation("hug");
+                if (contactAllowed) userVisual.PlayCombatAnimation("hug");
+                onImpact?.Invoke();
                 yield return _waitHug08;
 
                 t = 0f;

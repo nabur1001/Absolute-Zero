@@ -1,0 +1,1501 @@
+# PLAN_025 v5.7 Verification Prompt — Codex Review #16
+
+You are reviewing a **Unity 6 (6000.3.11f1) multiplayer game implementation plan**. v5.7 Review #15 scored 9.4 with 1 BLOCKER + 3 HIGH. All 4 have been fixed. Verify fixes are correct and no new issues remain.
+
+## Project Context
+
+- **Engine:** Unity 6 (6000.3.11f1)
+- **Network:** NGO 2.11.2, Unity Relay (DTLS), Host-authoritative
+- **Game:** 2.5D turn-based temperature deathmatch. Current: 1v1 Bo3. Adding: 3~4 player multi mode, solo/bot, ghost system.
+- **Key NGO fact:** Host ClientId = 0. Using `ulong 0` as disconnect sentinel is invalid.
+
+## Review History (condensed)
+
+| Review | Score | Key |
+|--------|-------|-----|
+| #1-#12 | 4.0→9.5 | Foundation through final v5.6 APPROVED |
+| #13 | 9.1 | 4B+3H: 1v1 contract gaps |
+| #14 | 9.3 | 1B+4C: SPT schema, MCR exists, lifecycle |
+| #15 | 9.4 | 1B+3H: ClientId sentinel, seat owner, PSM callback, server-only |
+
+## Review #15 Issues Fixed
+
+| # | Type | Issue | Fix |
+|---|------|-------|-----|
+| B1 | BLOCKER | `CurrentClientId = 0` on disconnect collides with Host ClientId=0 | Changed to `ulong? CurrentClientId` — null = disconnected. Added: "MatchRoster clientId map에는 IsConnected==true (CurrentClientId!=null) 엔트리만 삽입" |
+| H1 | HIGH | A-3a and A-3b both claim seat allocation | A-3b rewritten: "seat 할당 금지 — SPT.SeatIndex를 그대로 hydrate. 0<=seat<RequiredPlayerCount, 중복/누락 검증 → startup 실패" |
+| H2 | HIGH | PSM direct callback + Dispatcher default = double call in 1v1 | A-3e: "PSM 직접 OnClientDisconnectCallback 구독은 모든 모드에서 제거. Dispatcher가 유일한 destructive lifecycle 구독. TurnManager/SessionManager 비파괴 observer는 유지" |
+| H3 | HIGH | MCR roster init runs on all peers but roster is server-only | A-6f: "MCR/PlayerRegistry 공통 초기화: 모든 peer. MatchRoster 생성·hydrate·RosterReady·timeout은 IsServer일 때만. 1v1 OnDestroy도 RestoreDefaultIfCurrent (no-op if not swapped)" |
+
+## YOUR TASK
+
+Verify all 4 fixes and overall consistency. Check:
+
+1. **B1**: `ulong? CurrentClientId` with null=disconnected. No `0` sentinel remains. Host (ClientId=0) correctly distinguishable
+2. **H1**: A-3b no longer allocates seats. SPT is sole seat authority. Validation contract present
+3. **H2**: PSM direct callback removal is explicit and applies to all modes. No double-call path exists
+4. **H3**: A-6f has IsServer guard for roster ops. 1v1 OnDestroy calls RestoreDefaultIfCurrent (no-op)
+5. **Cross-references**: A-3a↔A-3b↔A-3e↔A-4b↔A-6e↔A-6f↔B-8h — all consistent
+6. **Invariants**: 25/33/37 still consistent with PSM callback removal and server-only roster
+7. **No regression**: v5.6 core (golden test, SO mapping, ISeatStateAccessor, all other invariants) unchanged
+
+Score 0-10. If 9.5+ with no blockers, confirm APPROVED.
+
+---
+
+## FULL PLAN TEXT (mechanically copied from plan file)
+
+# PLAN_025 — Multi Mode Full Implementation (v5.7 — 1v1 회귀 안전 계약 추가)
+
+> **Status:** ✅ APPROVED (9.5/10, Codex Review #12) — 구현 준비 완료
+> **Created:** 2026-09-02 | **Revised:** 2026-09-03
+> **Dependencies:** GAME_DESIGN.md, PLAN_018, PLAN_020
+> **Absorbs:** PLAN_019 → 역사 문서 전환
+> **Scope:** GameScene_Multi 씬 + GameScene wiring 변경(MatchNetworkState 추가) → **1v1 동작 보존 (조건부 안전)**
+> **Will NOT touch:** 1v1 Resolve()/CombatResultData/전투 로직, PLAN_024 Rematch (1v1 전용)
+> **1v1 회귀 판정:** 조건부 안전 — 의도된 동작 변경 없지만 공유 코드 회귀 위험. B-8h 9건 통과 조건
+
+---
+
+## Codex Review #5 핵심 수정 (v5 → v5.1)
+
+| # | 지적 | v5.1 반영 |
+|---|------|---------|
+| B1 | DontDestroyWithOwner=false + ChangeOwnership PlayerObject 미등록 | **SeatRuntimeState 방식 (Multi/Solo)**: disconnect 시 서버가 NV 스냅샷→struct 보존, Despawn+Destroy OK. reconnect 시 새 SpawnAsPlayerObject + hydrate. 1v1은 default PSM 즉시 Despawn (capture 없음) |
+| B2 | Host가 타인 PlayerData 수정 불가 (Unity Lobby 권한) | **클라이언트 self-write**: 각 클라이언트가 token 생성 → 자기 Private PlayerData에 기록 → Host가 Private 읽기 → SessionParticipantTable 저장 |
+| B3 | ItemRuleSnapshot.From() 런타임 의존 효과 캡처 불가 | **ItemEffectRuleSnapshot**: 결과 아닌 계산 규칙 캡처. ItemEffectKind discriminator + 파라미터. Resolver가 runtime snapshot으로 결과 계산 |
+| B4 | DTO reader 배열 null 접근 | reader-side 배열 초기화 `??= new` + SeatCount≤4, EventCount≤16 양측 검증 |
+| B5 | GhostCooldownNetData: unmanaged+IEquatable 계약 없음 | 완전한 struct 계약 + MatchNetworkState 내 생성/구독/해제/Dispose/Clear 수명주기 명시 |
+| P1 | auto-ready vs pending intent 충돌 | disconnect 시 **pending intent 즉시 취소** (auto-ready = 무행동) |
+| P2 | ReadyTimestamp float, RPC FixedUpdate 보장 없음 | **ReadyServerTick** (int, NetworkManager.ServerTime.Tick) 사용 — v5.2: uint→int 수정 |
+| P3 | IsFanUpgraded Applicator 누락 | Applicator Shell step 2에 IsFanUpgraded NV write 명시 |
+
+## Codex Review #10 핵심 수정 (v5.5 → v5.6)
+
+| # | 지적 | v5.6 반영 |
+|---|------|---------|
+| B1 | Golden test: WaterGun=DirectDamage(Equalize 아님), HugTshirt=Equalize, BuldakNoodles Imm=0/Delayed=+20, 미확정 값 다수 | **21개 asset 전수 검증** — ? 값 0개, 전부 YAML에서 직접 읽은 값으로 확정. TargetMode/ScheduledType 칼럼 추가 |
+| H1 | Dispatcher lifecycle: MatchRoster MB/plain 불확실, cleanup owner 불명확 | MatchRoster=**plain class**(IDisconnectHandler+IDisposable). MatchCompositionRoot.OnDestroy()가 RestoreDefaultIfCurrent(roster)+Dispose(). 초기화 실패 시 catch 내 복원 |
+
+## Codex Review #9 핵심 수정 (v5.4 → v5.5)
+
+| # | 지적 | v5.5 반영 |
+|---|------|---------|
+| B1 | SO 매핑표: Attack.BaseDamage→Damage, BuldakNoodles=Buff, Cat/ClawMachine=Sabotage, SabotageItemDataSO 행 누락, Defense/Special 필드 불완전 | **7개 subclass exhaustive switch** + 실제 필드명 검증 + 21개 asset golden test 기댓값 표 |
+| B2 | MatchCombatSnapshot factory가 PlayerState 직접 읽기 → disconnect된 seat null 접근 | **MatchCombatSnapshotFactory** 명시: gameplay state는 ISeatStateAccessor read, IsReady는 connected 체크 후 fallback false |
+| H1 | Disconnect handler subscribe/unsubscribe + lobby 복귀 시 PlayerSpawnManager 복원 미명시 | **DisconnectDispatcher (DDOL)**: IDisconnectHandler 교체 패턴, MatchCompositionRoot.OnDestroy()에서 RestoreDefaultIfCurrent + Dispose |
+| H2 | 불변식 22("전체 NV") vs 30("4개 제외") 모순 | 불변식 22 문구 수정: "authoritative gameplay state" + 불변식 30 참조 |
+
+## Codex Review #8 핵심 수정 (v5.3 → v5.4)
+
+| # | 지적 | v5.4 반영 |
+|---|------|---------|
+| B1 | PlayerSpawnManager의 OnClientDisconnectCallback이 MatchRoster보다 먼저 실행되면 NV 추출 전 PlayerObject Despawn | **Disconnect 처리 단일 소유자**: PlayerSpawnManager disconnect callback 제거(Multi/Solo), MatchRoster가 유일한 disconnect handler. **Capture→Roster→Despawn 순서 보장** 명시 |
+| B2 | Applicator Shell이 PlayerState.Temperature.Value 직접 쓰기 → disconnect된 타겟 적용 불가 | **Applicator Shell ISeatStateAccessor 경유**: 모든 seat에 대한 NV write를 ISeatStateAccessor로 통일. PlayerState 직접 참조 금지 |
+| B3 | ItemEffectRuleSnapshot에 Buff/Debuff의 signed ImmediateTempDelta 표현 없음 (Soda -5/+15, Samgyetang +3/-7) | `ImmediateTempDelta`(signed), `IsSelfTarget` 필드 추가 + 21종 SO→Snapshot From() 매핑 표 |
+| B4 | 라운드 리셋 SetFanSpeed(seat,0) — 실제 기본값은 TemperatureSystem.DEFAULT_FAN_SPEED=1f | `SetFanSpeed(seat, DEFAULT_FAN_SPEED)` + `SetIsFanActive(seat, false)` 명시 |
+| P1 | Gate 1에서 StartHost() 전 token table/approval callback 등록 순서 미명시 | **StartHost 전 사전조건**: token table 구성 + ConnectionApproval callback 등록 → StartHost() 순서 명시 |
+| P2 | ISeatStateAccessor가 "전체 NV 커버" 표현이지만 IsReady/HasSelectedItem/CosmeticDataNV 미포함 | ISeatStateAccessor 범위를 **"disconnect grace 중 보존할 authoritative gameplay state"**로 정의. IsReady/HasSelectedItem/CosmeticDataNV/SyncedPlayerIndex 제외 + offline 기본값 명시 |
+
+## Codex Review #7 핵심 수정 (v5.2 → v5.3)
+
+| # | 지적 | v5.3 반영 |
+|---|------|---------|
+| B1 | ISeatStateAccessor에 IsFanActive/IsFanUpgraded/IsBasicBlocked 누락 + offline TryKill/RoundReset 미대응 + PendingEffects 중복 | ISeatStateAccessor **완전 확장** (전체 NV 커버). `TryKill(byte seat, DamageSource)` seat 기반으로 변경. `RoundResetAll(ISeatStateAccessor)` 경유. SeatRuntimeState에서 PendingEffects 필드+reconnect 재등록 **제거** |
+| B2 | MatchCombatSnapshot에 IsReady[] 미정의 → Tarot Resolver 컴파일 실패 | `bool[] IsReady` 추가. Factory: `PlayerState.IsReady.Value` seat-indexed copy |
+| B3 | Token gate가 단일 시점 → Relay 코드 수신한 클라이언트가 token polling 전에 연결하여 거절 | **2단계 gate**: (1) Lobby gate: `LobbyPlayerCount==Required && TokenReadyCount==Required` → Relay 코드 공유. (2) NGO gate: `ApprovedNgoClientCount==Required` → 씬 전환 |
+| P1 | reconnect hydrate 중 SyncedPlayerIndex 먼저 설정 시 반쯤 복원된 PlayerState 노출 | **hydrate commit 순서**: Temperature→Inventory→Modifier→... → 마지막에 SyncedPlayerIndex 설정. 또는 `IsHydrated` latch |
+| P2 | 프롬프트 "원문 그대로" 표현이지만 929줄 vs 941줄 | 프롬프트 생성 시 **plan 파일을 기계적 삽입** |
+| P3 | 불변식 제목 "16개" → 실제 21개 | 제목 수정 |
+
+## Codex Review #6 핵심 수정 (v5.1 → v5.2)
+
+| # | 지적 | v5.2 반영 |
+|---|------|---------|
+| B1 | DontDestroyWithOwner=false → OnClientDisconnected 전에 NGO가 PlayerObject despawn | **DontDestroyWithOwner=true** Player.prefab 설정. disconnect 시 NGO가 서버 소유로 전환 → OnClientDisconnected에서 **라이브 PlayerState**로 SeatRuntimeState 추출 → 명시적 Despawn+Destroy |
+| B2 | disconnect grace 동안 ScheduledEffect/환경/Ghost가 빈 seat 타겟 불가 | **ISeatStateAccessor** 인터페이스: PlayerState 존재→NV 읽기/쓰기, 미존재→SeatRuntimeState 읽기/쓰기. BuffDebuffSystem seat-keyed 중앙 관리 |
+| B3 | ItemEffectRuleSnapshot 수식 오류: Equalize≠평균, Recovery≠baseHeal*remaining, Tarot≠intent | **Equalize**: `EqualizeToUserTemp` flag→Resolver가 target.temp=user.temp. **Recovery**: `HealPerUse[]`+`MaxUses`→Resolver가 `HealPerUse[MaxUses-RemainingUses]`. **Tarot**: `RequiresTargetReady`→Resolver가 `IsReady` 상태 확인 |
+| P1 | ReadyServerTick uint→int | `NetworkTime.Tick`은 `int` (NGO 소스 확인). `ReadyServerTick` 타입 `int`로 수정 |
+| P2 | DTO writer-side 검증 누락 | Writer: `Events!=null && EventCount<=Events.Length`, 모든 배열 null 체크 |
+| P3 | Token ready gate + Guid 대신 암호학적 랜덤 | `ConnectedCount==RequiredPlayerCount && TokenReadyCount==RequiredPlayerCount`. `RandomNumberGenerator.GetBytes(32)` 사용 |
+| P4 | Codex prompt에 축약 69개 → 실제 180개 | prompt 파일에 전체 plan 원문 포함 |
+
+## 이전 리뷰 수정 이력 (v1~v5 → v5.1)
+
+<details>
+<summary>Review #1~#5 수정 사항 (접기)</summary>
+
+| Review | Score | 주요 수정 |
+|--------|-------|-----------|
+| #1 (4.0) | 11 blockers | Phase 순서, Roster, ActionIntent, DTO 설계 |
+| #2 (6.0) | 5 blockers | B0↔B 순환, domain violation, MatchConfig NV, Roster reconnect |
+| #3 (6.0) | 8B+6P | MCR NV불가→MatchNetworkState, SO→value snapshot, Session/Match scope, seat spawn |
+| #4 (6.0) | 7B+6P | PlayerState 보존, MatchNetworkState lifecycle, grace vs round end, PlayerStateDelta, 수동 직렬화, Solo port, token, ChillAura epoch |
+
+</details>
+
+---
+
+## Overview
+
+1v1과 Multi는 **분리 씬**. `GameScene` (1v1 Bo3)의 전투 로직은 보존하고, 양쪽 씬에 `MatchNetworkState` NetworkBehaviour를 추가한다. `GameScene_Multi` (킬 기반 5킬 승리)를 신규 구축. PLAN_019 핵심 계약 흡수.
+
+### 씬 구조
+
+| Build Index | 씬 | 용도 |
+|---|---|---|
+| 0 | `LobbyScene` | 로비 (공통) |
+| 1 | `GameScene` | 1v1 Bo3 (현행 + MatchNetworkState 추가) |
+| 2 | `GameScene_Multi` | 3~4인 다인전 (5킬) |
+| 3 | `GameScene_Solo` (또는 GameScene 공유) | 솔로 봇전 (TBD) |
+
+### 디자인 패턴
+
+| 시스템 | 패턴 |
+|---|---|
+| 규칙 분기 | **Strategy** — `IGameModeRule` |
+| 참가자 관리 | **Registry + Roster** (PLAN_019 §4) |
+| 아이템 선택 | **Command** — `ActionIntent` |
+| 사망/킬 귀속 | **Centralized** — `AuthoritativeDeathService` |
+| 전투 파이프라인 | **Functional Core / Imperative Shell** — value snapshot→resolution→applicator |
+| Domain↔Network | **Anti-Corruption Layer** — `CombatResolutionBatchNetData` (수동 직렬화) |
+| Ghost | **State Pattern** — `LifeState { Alive, Ghost }` |
+| Bot AI | **Behavior Tree** |
+| N인 연출 | **Sequencer** — PresentationBarrier + CombatVFXManager |
+
+### Phase 의존성 (v5 확정)
+
+```
+Phase A (MatchConfig + MatchNetworkState + Session/Match Roster + Spawn + 씬 + HUD)
+    ↓
+Phase B0 (LifeState + DeathService + DamageSource)
+    ↓
+Phase B (ActionIntent + Value Snapshots + N인 Resolver + DTO + Balance)
+    ↓
+Phase C (VFX + 환경)
+    ↓
+Phase D (Ghost Skill + Multiplier + UI)
+
+Phase A ──→ Phase E (Solo/Bot)
+
+Phase F ← 기획 답변 시
+```
+
+---
+
+## Phase A — MatchConfig + MatchNetworkState + Roster + Spawn + 씬 + HUD
+
+### A-1. GameMode + MatchConfig
+
+- [ ] A-1a. `NetworkConstants.GameMode` enum: `None=0, OneVsOne=1, Multi=2, Solo=3`
+- [ ] A-1b. `IGameModeRule` interface (12개 필드)
+- [ ] A-1c. `GameModeRuleSO : ScriptableObject, IGameModeRule` — 배열 Awake copy
+- [ ] A-1d. `MatchConfig` 서버 런타임: `{ IGameModeRule Rule, int RequiredPlayerCount, GameMode Mode }`
+- [ ] A-1e. `MatchConfigNetData : INetworkSerializable` — `{ byte Mode, byte RequiredPlayerCount }`
+
+### A-2. MatchNetworkState — 완전한 NGO 수명주기 (B2 해결)
+
+- [ ] A-2a. `MatchNetworkState : NetworkBehaviour` 씬 오브젝트로 배치:
+  - **GameObject에 NetworkObject 컴포넌트 필수** (씬 내 NetworkBehaviour는 NetworkObject가 같은 GO에 있어야 함)
+  - GameScene **및** GameScene_Multi 양쪽에 배치 (1v1도 MatchConfig 필요)
+- [ ] A-2b. 필드:
+  ```csharp
+  public NetworkVariable<MatchConfigNetData> Config = new(
+      default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+  public NetworkList<int> KillScores;  // Awake에서 생성
+  ```
+- [ ] A-2c. Awake:
+  ```csharp
+  void Awake() { KillScores = new NetworkList<int>(); }
+  ```
+- [ ] A-2d. OnNetworkSpawn — **Host 포함**:
+  ```csharp
+  public override void OnNetworkSpawn()
+  {
+      // Host/Client 모두 구독 (IsClient && !IsServer 아님!)
+      Config.OnValueChanged += OnConfigChanged;
+      KillScores.OnListChanged += OnKillScoresChanged;
+      
+      // 초기값 읽기 (이미 서버가 기록했을 수 있음)
+      if (Config.Value.Mode != 0)
+          OnConfigReceived(Config.Value);
+  }
+  ```
+  - ⚠ **람다 아닌 저장 delegate** (named method)
+- [ ] A-2e. OnNetworkDespawn — 이벤트 해제:
+  ```csharp
+  public override void OnNetworkDespawn()
+  {
+      Config.OnValueChanged -= OnConfigChanged;
+      KillScores.OnListChanged -= OnKillScoresChanged;
+  }
+  ```
+- [ ] A-2f. OnDestroy — NetworkList Dispose:
+  ```csharp
+  void OnDestroy() { KillScores?.Dispose(); }
+  ```
+- [ ] A-2g. 서버: scene load 완료 후 `Config.Value = data` 1회 기록 + `KillScores` 초기화 (RequiredPlayerCount 크기, 0 fill)
+- [ ] A-2h. MCR: `MatchNetworkState` FindAnyObjectByType → 복제 상태 읽어 local MatchConfig 조립
+
+### A-3. Session Scope vs Match Scope Roster
+
+- [ ] A-3a. **SessionParticipantTable** (DDOL, Coordinator 소유):
+  - Host 시작 시 생성
+  - Lobby participant:
+    ```csharp
+    SessionParticipantEntry
+    {
+        string ParticipantId;    // Lobby Player ID (세션 불변)
+        string SessionToken;     // 암호학적 랜덤 32바이트 Base64
+        byte   SeatIndex;        // 참가 등록 시 단조 증가 할당, 세션 동안 불변
+        bool   IsConnected;      // 현재 연결 상태
+        ulong? CurrentClientId;  // null = disconnected/not bound. ConnectionApproval 성공 시 할당
+    }
+    ```
+    - SeatIndex: Lobby 참가 순서로 0부터 단조 증가 할당. 세션 동안 보존 (disconnect/reconnect에도 불변)
+    - CurrentClientId: nullable — Host ClientId=0과 disconnect 구분. ConnectionApproval 성공 시 할당. disconnect 시 null로 해제 (ParticipantId→SeatIndex 유지). Reconnect 승인 시 새 ClientId로 교체
+    - MatchRoster clientId map에는 IsConnected==true (CurrentClientId!=null) 엔트리만 삽입
+    - MCR hydrate: 이 엔트리들로 clientId ↔ participantId ↔ seat 매핑을 MatchRoster에 채운 뒤 RosterReady=true
+  - **Token 전달 경로** (B2 해결 — Unity Lobby 권한 모델 준수):
+    ```
+    Unity Lobby 권한: 각 플레이어는 자기 PlayerData만 수정 가능.
+    Host도 타인의 PlayerData 수정 불가. 단, Host는 Private 데이터를 읽을 수 있음.
+    
+    1. 각 클라이언트가 Lobby Join 시 암호학적 random token 생성:
+       `System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)` → Base64 문자열
+       (P3 v5.2: Guid 대신 암호학적 랜덤 — 예측 불가능한 32바이트)
+    2. 자신의 PlayerData에 기록 (key: "SessionToken", visibility: Private)
+       → Private: 본인 + Host만 읽기 가능, 다른 멤버에게 노출 안 됨
+    3. Host: LobbyManager에서 Lobby.Players[].Data["SessionToken"] 읽기
+       → Host는 Private visibility 데이터 접근 가능 (Lobby API 권한)
+       → 읽은 token을 SessionParticipantTable에 저장
+    4. NGO 연결 시: 클라이언트가 자기가 생성한 token을 ConnectionData payload에 포함
+       payload = { ParticipantId(UTF8 bytes), token(UTF8 bytes) }
+    5. Reconnect 시: 동일 token 재사용 (token은 session 수명 동안 유효)
+    ```
+  - ConnectionApprovalCallback:
+    1. payload 파싱: ParticipantId + token
+    2. SessionParticipantTable 조회 + token 검증
+    3. 중복 ParticipantId (이미 connected) → 거절
+    4. 테이블에 없음 (late join) → 거절
+- [ ] A-3b. **MatchRoster** (서버 전용, MCR 소유):
+  - ConnectionState: `Connected, Disconnected, TimedOut` (연결만)
+  - seat 할당 금지 — SessionParticipantEntry.SeatIndex를 그대로 hydrate. 0 <= seat < RequiredPlayerCount, 중복/누락 seat 검증 → 위반 시 startup 실패
+  - PlayerIndex = seat 불변
+- [ ] A-3c. **SeatRuntimeState** 서버 전용 struct (B1 해결):
+  ```csharp
+  // 서버 전용 — disconnect 시 PlayerState NV 스냅샷 보존용
+  struct SeatRuntimeState
+  {
+      public byte SeatIndex;
+      public float Temperature;
+      public LifeState CurrentLifeState;
+      public float FanSpeed;
+      public bool IsFanActive;
+      public bool IsFanUpgraded;
+      public bool IsBasicBlocked;
+      public PlayerModifiers Modifiers;         // value struct copy
+      public SlotSnapshot[] InventorySlots;      // defensive copy
+      // ⚠ PendingEffects 제거 (B1 v5.3): ScheduledEffect는 BuffDebuffSystem에서 seat-keyed 중앙 관리
+      //   SeatRuntimeState에 중복 보관 시 reconnect 재등록으로 이중 발동 위험
+      public DamageSource LastDamageSource;
+      // KillScore는 MatchNetworkState 소유 → 별도 보존 불필요
+  }
+  ```
+  - MatchRoster가 `Dictionary<byte seat, SeatRuntimeState>` 보유
+- [ ] A-3d. **Player.prefab 설정 변경 (B1 v5.2)**:
+  ```
+  ⚠ Player.prefab NetworkObject.DontDestroyWithOwner = true (현재 false=0 → true로 변경)
+  
+  이유: DontDestroyWithOwner=false일 때 NGO는 OnClientDisconnected 콜백 **이전에**
+  PlayerObject를 자동 despawn (NetworkConnectionManager.cs:1362 참조).
+  → NV를 읽을 수 없어 SeatRuntimeState 추출 불가.
+  
+  DontDestroyWithOwner=true:
+  - NGO가 owner disconnect 시 PlayerObject 소유권을 **서버로 자동 전환**
+  - PlayerState가 살아있는 상태에서 OnClientDisconnected 콜백 실행
+  - 서버가 라이브 NV를 직접 읽어 SeatRuntimeState 추출 가능
+  - 추출 완료 후 서버가 명시적 Despawn + Destroy
+  ```
+- [ ] A-3e. **Disconnect 처리 — 단일 소유자 (B1 v5.4)**:
+  ```
+  ⚠ 경쟁 조건 방지 (B1 v5.4):
+  PlayerSpawnManager.OnClientDisconnectCallback이 현재 즉시 Despawn+Destroy 실행 (line 168-175).
+  MatchRoster 콜백보다 먼저 실행되면 라이브 NV 추출 불가.
+
+  **해결: Disconnect 처리 단일 소유자 + lifecycle (H1 v5.5 보강)**
+  - **구조: DisconnectDispatcher (DDOL MonoBehaviour)**
+    - NetworkManager.OnClientDisconnectCallback에 단일 destructive lifecycle 구독
+    - PlayerSpawnManager의 직접 OnClientDisconnectCallback 구독은 **모든 모드에서 제거** (중복 호출 방지)
+    - IDisconnectHandler 인터페이스: `void OnPlayerDisconnected(ulong clientId)`
+    - 모드별 handler 교체: `SetHandler(IDisconnectHandler handler)`
+    - default handler = PlayerSpawnManager (Dispatcher가 호출 → 기존 즉시 Despawn 동작)
+    - Multi/Solo 진입 시: MatchRoster가 handler 등록 → Capture→Roster→Despawn 경로
+    - TurnManager/SessionManager의 비파괴 observer 구독은 유지 (Dispatcher와 독립)
+    - Match 종료/Lobby 복귀 시: MatchCompositionRoot.OnDestroy()에서 RestoreDefaultIfCurrent(roster) + roster.Dispose()
+    - **lifecycle 보장 (H1 v5.6 보강)**:
+      ① MatchCompositionRoot(MonoBehaviour, GameScene_Multi) OnEnable:
+         - MatchRoster 생성 (plain class, IDisconnectHandler 구현)
+         - DisconnectDispatcher.SetHandler(roster)
+         - 실패 시: catch 내에서 RestoreDefault 호출 보장
+      ② Match 진행 중: MatchRoster가 disconnect 처리
+      ③ MatchCompositionRoot.OnDestroy():
+         - DisconnectDispatcher.RestoreDefaultIfCurrent(roster) 호출
+           → 현재 handler가 이 roster일 때만 default 복원 (다른 match의 roster 보호)
+         - MatchRoster.Dispose() → 내부 리소스 정리
+      ④ DisconnectDispatcher.OnDestroy():
+         - NetworkManager.OnClientDisconnectCallback -= handler 구독 해제
+      ⑤ 1v1 GameScene: MCR가 2-seat MatchRoster 생성하되 seat resolution에만 사용. DisconnectDispatcher handler 교체 안 함 → default PlayerSpawnManager (즉시 Despawn+Destroy, 30초 grace 미적용)
+    - ⚠ MatchRoster는 **plain class** (IDisconnectHandler, IDisposable 구현)
+      — MonoBehaviour 아님, 수명은 MatchCompositionRoot가 관리
+    - ⚠ DDOL PlayerSpawnManager와 scene-scoped MatchCompositionRoot 수명 차이를 dispatcher가 중재
+
+  순서 보장 (Capture → Roster → Despawn):
+  1. NGO: owner disconnect → DontDestroyWithOwner=true이므로 소유권 서버 전환
+  2. MatchRoster의 OnClientDisconnected 콜백 실행 (유일한 handler)
+  3. 서버: PlayerRegistry에서 clientId → seat → **라이브 PlayerState** 참조
+  4. 라이브 PlayerState의 모든 gameplay NV를 직접 읽어 SeatRuntimeState 추출
+     (Temperature.Value, CurrentLifeState.Value, FanSpeed.Value,
+      IsFanActive.Value, IsFanUpgraded.Value, IsBasicBlocked.Value,
+      Modifiers, Inventory)
+  5. MatchRoster에 SeatRuntimeState 저장
+  6. PlayerState NetworkObject: 명시적 Despawn() + Destroy() (이제 서버 소유)
+  7. MatchRoster seat.State → Disconnected + 30초 타이머 시작
+  8. 진행 중 Barrier에서 이전 ClientId 즉시 제거
+  9. **pending intent 즉시 취소** — auto-ready (무행동으로 턴 진행) [P1 해결]
+  10. PlayerRegistry: seat unbind
+  ```
+- [ ] A-3f. **Reconnect** (B1 해결):
+  ```
+  1. ConnectionApproval 통과 (A-3a 토큰 검증)
+  2. MatchRoster에서 ParticipantId → seat 조회
+  3. seat.State == Disconnected 확인
+  4. 새 Player prefab SpawnAsPlayerObject(newClientId) — 정상적 PlayerObject 등록
+     → LocalClient.PlayerObject, NetworkManager 내부 lookup 자동 작동
+     → InventoryPresenter, CombatVFXManager, MiniGameHub 등 기존 코드 호환
+  5. SeatRuntimeState → 새 PlayerState에 hydrate (서버가 모든 NV write):
+     **hydrate commit 순서 (P1 v5.3 — 반쯤 복원된 PlayerState 노출 방지)**:
+     ① Temperature.Value, CurrentLifeState.Value, FanSpeed.Value,
+        IsFanActive.Value, IsFanUpgraded.Value, IsBasicBlocked.Value
+     ② Modifiers 복원, Inventory 복원
+     ③ **SyncedPlayerIndex 마지막에 설정** → 이 시점까지 TurnManager에 미노출
+     ④ IsHydrated latch (선택): Rpc 수신 전 guard
+     // ⚠ PendingEffects 재등록 없음 (B1 v5.3): ScheduledEffect는 BuffDebuffSystem 중앙 보관,
+     //   reconnect 시 이미 seat-keyed로 존재하므로 재등록 불필요 + 이중 발동 방지
+  6. seat.ClientId = newClientId, seat.State = Connected
+  7. PlayerRegistry: seat → 새 PlayerState rebind
+  8. MatchRoster에서 SeatRuntimeState 제거 (hydrate 완료)
+  9. ⚠ 진행 중 Barrier: 추가하지 않음 → 다음 sequence부터 참여
+  ```
+- [ ] A-3g. **ISeatStateAccessor 인터페이스 (B1 v5.3 + P2 v5.4 — authoritative gameplay state)**:
+  ```csharp
+  // ⚠ 범위 정의 (P2 v5.4):
+  // ISeatStateAccessor는 "disconnect grace 중 보존할 authoritative gameplay state"만 커버.
+  // PlayerState의 모든 NV가 아님 — 아래 NV는 의도적으로 제외:
+  //
+  // 제외 NV | 이유 | Offline 기본값
+  // --------|------|---------------
+  // IsReady | 턴 진행 상태. disconnect 시 auto-ready (무행동) | false
+  // HasSelectedItem | 턴 진행 상태. disconnect 시 아이템 없음 처리 | false
+  // CosmeticDataNV | 비게임 플레이. reconnect 시 SessionParticipantTable에서 복원 | 이전 값 유지 (cosmetic)
+  // SyncedPlayerIndex | hydrate 순서 제어용. 마지막에 설정 (P1 v5.3) | 미설정→TurnManager 미노출
+  //
+  // 이 4개 NV의 offline 동작:
+  // - IsReady/HasSelectedItem: disconnect 시 pending intent 취소 → auto-ready (step 9)
+  // - CosmeticDataNV: reconnect hydrate에서 SessionParticipantTable.CosmeticJson → NV 복원
+  // - SyncedPlayerIndex: hydrate 마지막 단계에서 설정 (A-3f step 5-③)
+  
+  // disconnect grace 동안 gameplay 시스템이 offline seat 상태에 접근
+  // PlayerState(NV) 또는 SeatRuntimeState(struct) 중 존재하는 쪽에 읽기/쓰기
+  interface ISeatStateAccessor
+  {
+      // ── Temperature ──
+      float GetTemperature(byte seat);
+      void SetTemperature(byte seat, float value);
+      
+      // ── LifeState ──
+      LifeState GetLifeState(byte seat);
+      void SetLifeState(byte seat, LifeState value);
+      
+      // ── Fan ──
+      float GetFanSpeed(byte seat);
+      void SetFanSpeed(byte seat, float value);
+      bool GetIsFanActive(byte seat);
+      void SetIsFanActive(byte seat, bool value);
+      bool GetIsFanUpgraded(byte seat);
+      void SetIsFanUpgraded(byte seat, bool value);
+      
+      // ── Status ──
+      bool GetIsBasicBlocked(byte seat);
+      void SetIsBasicBlocked(byte seat, bool value);
+      
+      // ── Modifiers ──
+      PlayerModifiers GetModifiers(byte seat);
+      void SetModifiers(byte seat, PlayerModifiers value);
+      
+      // ── Inventory (라운드 리셋 시 재구성 필요) ──
+      SlotSnapshot[] GetInventorySlots(byte seat);
+      void SetInventorySlots(byte seat, SlotSnapshot[] slots);
+      void ClearInventory(byte seat);  // 사망 시
+      
+      // ── Connection 상태 ──
+      bool IsConnected(byte seat);   // PlayerState 존재 여부
+      bool IsActive(byte seat);      // Connected || Disconnected (TimedOut 제외)
+  }
+  
+  // 구현: MatchRoster가 ISeatStateAccessor 구현
+  // - IsConnected(seat)==true → PlayerRegistry에서 PlayerState 찾아 NV 읽기/쓰기
+  // - IsConnected(seat)==false → SeatRuntimeState dict에서 읽기/쓰기
+  // 
+  // 사용처 (B1 v5.3 + B2 v5.4 확장):
+  // - **Applicator Shell (B2 v5.4)**: 모든 resolution 결과 적용 시 ISeatStateAccessor 경유.
+  //   PlayerState 직접 참조 금지 → disconnect된 타겟에도 안전하게 적용
+  // - BuffDebuffSystem: ScheduledEffect 적용 시 ISeatStateAccessor로 온도 변경
+  // - TemperatureSystem: ApplyFanTick/RecoveryTick 시 ISeatStateAccessor 경유
+  // - GhostSkillService: ChillAura/FrostStrike 적용 시 ISeatStateAccessor 경유
+  // - **AuthoritativeDeathService**: TryKill(byte seat, DamageSource) — ISeatStateAccessor로
+  //   GetLifeState → SetLifeState(Ghost) + ClearInventory. offline seat도 사망 처리 가능
+  // - **RoundResetAll**: 전 seat 순회하며 ISeatStateAccessor로 Temperature=37, LifeState=Alive,
+  //   FanSpeed/IsFanUpgraded/IsBasicBlocked 초기화, Inventory 기본4종+랜덤 재구성
+  // - Reconnect hydrate: SeatRuntimeState의 최신 값(grace 중 변경된 값 포함)으로 NV 복원
+  //
+  // ⚠ ScheduledEffect는 중앙 시스템에 seat-keyed로 보관 (BuffDebuffSystem의 dict)
+  //   PlayerState에도 SeatRuntimeState에도 중복 보관하지 않음
+  ```
+- [ ] A-3h. **30초 timeout**: TimedOut → SeatRuntimeState 폐기 → seat permanently empty → 생존자 재평가
+- [ ] A-3i. **2단계 Start gate (B3 v5.3)**:
+  ```
+  ⚠ 단일 gate 문제: Relay 코드 수신한 클라이언트가 Host의 token polling 완료 전에
+  NGO 연결을 시도하면 ConnectionApproval에서 token 미등록으로 거절됨.
+  
+  Gate 1 — Lobby/Relay gate (Relay 코드 공유 전):
+    LobbyPlayerCount == RequiredPlayerCount
+    && TokenReadyCount == RequiredPlayerCount
+    → 모든 token이 SessionParticipantTable에 등록된 후에만 Relay 코드 배포
+    → 이후 클라이언트가 NGO 연결 시도해도 token 검증 통과 보장
+
+  ⚠ StartHost 전 사전조건 (P1 v5.4):
+    현재 NetworkSessionCoordinator는 Relay 코드 공개 전에 StartHost()를 호출하고,
+    NGO는 StartHost() 내부에서 Host의 ConnectionApproval callback도 실행함.
+    따라서 반드시 이 순서를 보장:
+    ① SessionParticipantTable에 모든 token 등록 완료
+    ② ConnectionApproval callback 등록 (token 검증 로직 포함)
+    ③ StartHost() 호출
+    ④ Gate 1 통과 확인 후 Relay 코드를 Lobby에 배포
+    → 클라이언트가 NGO 연결 시도 시 ①②가 이미 준비된 상태
+
+  Gate 2 — NGO/Scene gate (씬 전환 전):
+    ApprovedNgoClientCount == RequiredPlayerCount
+    → 모든 클라이언트가 ConnectionApproval 통과 후 씬 전환
+  ```
+  - Token 생성: `System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)` (Guid 대신 암호학적 랜덤)
+  - 각 클라이언트가 token 생성 → Private PlayerData 기록 → Host 읽기 → SessionParticipantTable 저장
+  - TokenReadyCount: SessionParticipantTable에서 token 수신 완료된 참가자 수
+- [ ] A-3j. Late join 거절
+
+### A-4. Spawn + Registry
+
+- [ ] A-4a. `PlayerSpawnManager.GetSpawnPosition(byte seatIndex)`: markers[seat].position
+- [ ] A-4b. 서버 스폰: `MatchRoster.GetSeat(clientId) → seat → GetSpawnPosition(seat)`
+  - **Roster hydration 순서:**
+    ① SessionParticipantTable 엔트리에 안정적인 SeatIndex 저장 (Lobby join 순서 기준 할당)
+    ② GameScene/GameScene_Multi 로드 → MCR.OnEnable() → MatchRoster 생성 + SessionParticipantTable에서 ParticipantId→SeatIndex hydrate
+    ③ MatchRoster.IsReady = true 설정
+    ④ PlayerSpawnManager: RosterReady 이후에만 pending client spawn 실행
+    ⑤ Reconnect: 동일 ParticipantId → 동일 SeatIndex 보장 (SessionParticipantTable 기준)
+  - **1v1 계약:** GameScene(index 1)도 MCR가 2-seat MatchRoster 생성 (A-6f). 동일한 `GetSeat()` 경로 사용
+  - **1v1 disconnect:** MatchRoster는 seat resolution에만 사용. DisconnectDispatcher handler는 default(PlayerSpawnManager) 유지 — 30초 grace/reconnect는 Multi/Solo 전용
+  - **Spawn guard:** MatchRoster == null || !RosterReady → spawn하지 않고 pending queue 유지
+    - pending 존재 시 RosterReady 이벤트 구독
+    - Ready 직후 구독 해제 + pending 일괄 spawn
+    - scene exit / network shutdown / PlayerSpawnManager.OnDestroy에서도 구독 해제
+    - idempotent guard: 재호출 시 동일 client PlayerObject 중복 생성 방지
+    - startup timeout (소유자: MCR): 제한시간 초과 시 match startup 실패 → 로비 복귀
+- [ ] A-4c. PlayerSpawnManager scene 판정 수정:
+  - `gameSceneName` 단일 문자열 비교 제거 (현재: `sceneName != "GameScene"`)
+  - gameplay scene 판정: MatchCompositionRoot 존재 + MatchRoster.IsReady로 결정
+  - LobbyScene에서는 spawn하지 않음 (MCR 미존재)
+  - GameScene, GameScene_Multi, GameScene_Solo 모두 동일 경로
+- [ ] A-4d. `PlayerState.Initialize(byte seat)` — TurnManager ClientId 정렬 경로 제거
+- [ ] A-4e. PlayerRegistry: `Register(seat, playerState)` seat 기반 lookup
+
+### A-5. 로비 → 다인전 진입
+
+- [ ] A-5a. LobbyModeSelectView "다인전" 버튼 → 인원 선택
+- [ ] A-5b. LobbyPresenter.HandleMultiClicked(int count)
+- [ ] A-5c. LobbyRoomView 3~4인 슬롯
+- [ ] A-5d. NetworkSessionCoordinator: CreateLobbyAsync(mode, playerCount), Relay AllocateAsync(playerCount - 1), 씬 분기
+- [ ] A-5e. 기존 1v1: OneVsOne+2 (기존 시그니처 보존)
+- [ ] A-5f. ConnectionApproval 등록
+
+### A-6. GameScene_Multi 씬
+
+- [ ] A-6a. GameScene 복사 → index 2
+- [ ] A-6b. SpawnPoint3D 4개 (Order 0~3)
+- [ ] A-6c. EnemyPlayer_0/1/2
+- [ ] A-6d. Visual slot ↔ Match seat 분리:
+  ```
+  localSeat = myPlayerIndex
+  remoteSeatList = allSeats.Where(s != localSeat).OrderBy(s)
+  remoteSeatList[i] → EnemyPlayer_{i}
+  ```
+- [ ] A-6e. GameScene_Multi: 복사된 MatchCompositionRoot 확장 + MatchNetworkState(+NetworkObject) + Multi GameModeRuleSO. 씬별 MCR 정확히 1개
+- [ ] A-6f. GameScene 기존 MatchCompositionRoot 확장 + MatchNetworkState(+NetworkObject) 추가 (1v1용):
+  - 기존 MCR은 이미 GameScene에 배치됨 — 새로 추가하지 않고 확장
+  - MCR/PlayerRegistry 공통 초기화: 모든 peer에서 실행
+  - **Server-only:** MatchRoster 생성·hydrate·RosterReady 기록·startup timeout은 `NetworkManager.IsServer`일 때만 실행
+  - MCR.OnEnable() (server): SessionParticipantTable에서 2-seat MatchRoster 생성 + hydrate → RosterReady=true
+  - 1v1에서는 DisconnectDispatcher handler를 교체하지 않음 (default PlayerSpawnManager 유지)
+  - MCR.OnDestroy(): RestoreDefaultIfCurrent(roster) + roster.Dispose() — handler 미교체 시 안전한 no-op. 모든 모드에서 동일 cleanup 경로 사용
+  - 씬별 MCR 정확히 1개 보장
+- [ ] A-6g. Build Settings 갱신
+
+### A-7. N인 HUD
+
+| UI 파일 | 변경 |
+|---------|------|
+| MatchSnapshot | +KillScores[], +LifeStates[], +RequiredPlayerCount |
+| GameDataBridge | +MatchNetworkState.Config/KillScores 구독, seat-keyed N인 |
+| MatchHudPresenter | 킬 스코어 N인, 라운드(1v1) vs 킬(Multi) |
+| GameHudRefs | +N인 상대 온도 바, 킬 스코어 텍스트 |
+| GameHudBuilder | N인 상대 bar 동적 생성 |
+| OpponentBarPresenter | seat-keyed N인 |
+| InventoryPresenter | 드래그-타겟 (B-2c 연계) |
+| RoundResultPresenter | Multi 공동 승리 → Lobby 복귀 |
+| TemperaturePresenter | N인 |
+
+- [ ] A-7a. MatchSnapshot 확장
+- [ ] A-7b. GameDataBridge 확장
+- [ ] A-7c. MatchHudPresenter 확장
+- [ ] A-7d. GameHudRefs 확장
+- [ ] A-7e. GameHudBuilder 확장
+- [ ] A-7f. OpponentBarPresenter 확장
+- [ ] A-7g. InventoryPresenter 확장
+- [ ] A-7h. RoundResultPresenter 확장
+- [ ] A-7i. TemperaturePresenter 확장
+
+### A-8. 통합 테스트
+
+- [ ] A-8a. 로비 → 3인 방 → GameScene_Multi 로드
+- [ ] A-8b. seat 안정성 (disconnect → reconnect → 같은 seat, **새 PlayerState + hydrate된 NV 동일값**)
+- [ ] A-8c. MatchNetworkState: 초기값 + OnValueChanged (Host + Client 모두)
+- [ ] A-8d. Relay allocation: playerCount - 1
+- [ ] A-8e. 1v1 회귀 (GameScene + MatchNetworkState 정상)
+- [ ] A-8f. ConnectionApproval 거절 (중복 ParticipantId, late join, 잘못된 token)
+- [ ] A-8g. spawn = SpawnPoint[seat]
+- [ ] A-8h. 2단계 start gate: Lobby gate(token ready→relay 배포) + NGO gate(approved→씬 전환) (B3 v5.3)
+- [ ] A-8i. disconnect → **라이브 PlayerState에서 NV 읽기** → SeatRuntimeState 추출 → 명시적 Despawn+Destroy (B1 v5.2)
+- [ ] A-8j. reconnect → 새 SpawnAsPlayerObject + hydrate된 NV 값 일치 확인 (grace 중 변경 값 포함)
+- [ ] A-8k. token 전달: RandomNumberGenerator.GetBytes(32) → Private PlayerData → Host 읽기 → ConnectionData (P3 v5.2)
+- [ ] A-8l. **(v5.2)** ISeatStateAccessor: disconnect grace 중 ScheduledEffect가 disconnected seat 온도 변경 → reconnect 시 해당 변경 반영
+- [ ] A-8m. **(v5.2)** DontDestroyWithOwner=true 확인: Player.prefab NetworkObject inspector 값
+- [ ] A-8n. **(v5.3)** 2단계 gate: Lobby gate 통과 전 NGO 연결 시도 → token 미등록 거절 안 됨
+- [ ] A-8o. **(v5.3)** offline seat 라운드 리셋: disconnect grace 중 라운드 종료 → offline seat도 37° + Alive + 기본4종
+- [ ] A-8p. **(v5.3)** offline seat 사망: ScheduledEffect로 offline seat 0° → Ghost 전환 + 킬 귀속
+- [ ] A-8q. **(v5.3)** reconnect hydrate 순서: SyncedPlayerIndex 마지막 → TurnManager 미노출 확인
+- [ ] A-8r. **(v5.4)** disconnect callback 경쟁: PlayerSpawnManager callback 비활성 상태에서 MatchRoster Capture→Despawn 순서 확인
+- [ ] A-8s. **(v5.4)** Applicator Shell: 타겟 disconnect 후 resolution 적용 → ISeatStateAccessor 경유 SeatRuntimeState 갱신 확인
+- [ ] A-8t. **(v5.4)** Buff/Debuff snapshot: Soda(ImmediateTempDelta=-5, ScheduledValue=+15) + Samgyetang(ImmediateTempDelta=+3, ScheduledValue=-7) From() 매핑 일치
+- [ ] A-8u. **(v5.4)** 라운드 리셋 FanSpeed: 리셋 후 GetFanSpeed(seat)==1f, GetIsFanActive(seat)==false
+- [ ] A-8v. **(v5.5)** 21개 asset golden test: From(so) → snapshot 필드값 검증
+- [ ] A-8w. **(v5.5)** MatchCombatSnapshotFactory: seat disconnect 후 snapshot 생성 → ISeatStateAccessor read 성공, IsReady=false
+- [ ] A-8x. **(v5.5)** DisconnectDispatcher lifecycle: Multi→Lobby→1v1 전환 시 handler 복원 확인
+
+---
+
+## Phase B0 — LifeState + DeathService + DamageSource
+
+### B0-1. LifeState + Roster 분리
+
+- [ ] B0-1a. `LifeState { Alive, Ghost }` NV (PlayerState)
+- [ ] B0-1b. Roster = 연결 (Connected/Disconnected/TimedOut), LifeState = 게임 (Alive/Ghost)
+- [ ] B0-1c. **상태 조합 정의** (B3 해결):
+  ```
+  TurnEligible:         Connected && Alive → 턴 참가 (아이템 선택, Ready)
+  GhostEligible:        Connected && Ghost → Ghost 스킬 사용
+  CountsAsAliveForRoundEnd: (Connected || Disconnected) && Alive
+      → disconnect 유예 중에도 "살아있는 것으로 카운트"
+      → 라운드 종료 판정: CountsAsAliveForRoundEnd ≤ 1 or 전원 Ghost
+  AutoReady:            Disconnected && Alive → 행동 없이 자동 준비
+  ```
+  - ⚠ **TimedOut은 어느 카운트에도 포함 안 됨** → timeout 시 즉시 생존자 재평가
+
+### B0-2. AuthoritativeDeathService
+
+- [ ] B0-2a. **TryKill(byte victimSeat, DamageSource) — seat 기반 (B1 v5.3)**:
+  - ISeatStateAccessor 경유: `GetLifeState(seat)` guard Alive → `SetLifeState(seat, Ghost)`
+  - CancelTurnParticipation(seat) → `ClearInventory(seat)` (ISeatStateAccessor)
+  - guard `Origin!=Natural && KillerSeat<count` → KillScores++
+  - ⚠ **offline seat도 사망 처리 가능**: disconnect 유예 중 ScheduledEffect/환경으로 0°도달 시
+- [ ] B0-2b. IPlayerTurnCancellation 기본 구현
+- [ ] B0-2c. 사망 감지: deathQueue → batch 후 FlushDeathQueue → EvaluateRoundMatch
+  - Ghost Frost (PrepPhase 즉시): mutation 직후 즉시 FlushDeathQueue + round check
+- [ ] B0-2d. DamageSource 정규화:
+  ```
+  아이템 공격: { attackerSeat, Item }
+  선풍기 (ChillAura 없음): { 255, Natural }
+  선풍기 (ChillAura 적용 중): { ghostSeat, GhostChill }
+  Ghost FrostStrike: { ghostSeat, GhostFrost }
+  지연 효과: { sourceSeat, DelayedEffect }
+  규칙: KillerSeat=255 → 반드시 Natural
+  ```
+- [ ] B0-2e. ScheduledEffect.SourceSeat 추가, Schedule() 시그니처 확장
+
+### B0-3. 킬 스코어 + 승리 + 라운드 리셋
+
+- [ ] B0-3a. KillScores (MatchNetworkState 소유)
+- [ ] B0-3b. SeatSnapshot +killScore, +lifeState
+- [ ] B0-3c. 공동 승리 WinnerMask (Shell 계산)
+- [ ] B0-3d. 라운드 종료: **CountsAsAliveForRoundEnd** ≤ 1 or 전원 Ghost (B3)
+- [ ] B0-3e. **라운드 리셋 — ISeatStateAccessor 경유 (B1 v5.3)**:
+  ```
+  ⚠ 모든 active seat(Connected + Disconnected)을 ISeatStateAccessor로 순회.
+  offline seat도 리셋 적용 → reconnect 시 리셋된 상태로 hydrate.
+
+  1. 전원 SetTemperature(seat, 37°) + SetLifeState(seat, Alive)
+  2. 기본 4종 재구성: SetInventorySlots(seat, ...) (Multi 바람막이: IsUnlimited=false, RemainingUses=1)
+  3. 랜덤 Rule.InitialRandomItems (1v1:4, Multi:2)
+  4. Threshold 초기화
+  5. 킬 스코어 누적 (리셋 안 함)
+  6. Modifier 전체 초기화
+  7. Ghost cooldown 전체 클리어
+  8. Active debuff dictionary 클리어
+  9. ScheduledEffect 전체 클리어
+  10. SetFanSpeed(seat, TemperatureSystem.DEFAULT_FAN_SPEED) (=1f, 0이 아님!) (B4 v5.4)
+      + SetIsFanActive(seat, false)  (B4 v5.4: fan 비활성 상태로 리셋)
+      + SetIsFanUpgraded(seat, false)
+      + SetIsBasicBlocked(seat, false)
+      — 전부 ISeatStateAccessor 경유
+  ```
+
+### B0-4. 통합 테스트
+
+- [ ] B0-4a. 0° → Ghost 전환 (online + **offline seat 모두**)
+- [ ] B0-4b. 중복 TryKill 방지
+- [ ] B0-4c. 킬 스코어 + batch 공동 승리
+- [ ] B0-4d. 라운드 리셋 전체 (기본4종+랜덤+modifier+cooldown+fanspeed)
+- [ ] B0-4e. Natural source → 킬 없음 (OOB 방지)
+- [ ] B0-4f. 1v1 회귀: DeathRule.RoundEnd 분기
+- [ ] B0-4g. ScheduledEffect.SourceSeat → DelayedEffect 킬 귀속
+- [ ] B0-4h. **Disconnect 유예 중 라운드 미종료** (CountsAsAliveForRoundEnd)
+- [ ] B0-4i. **Timeout 후 즉시 생존자 재평가**
+
+---
+
+## Phase B — ActionIntent + Value Snapshots + N인 Resolver + DTO + Balance
+
+### B-1. ActionIntent
+
+- [ ] B-1a. `ActionIntent` readonly struct: { SourceSeat, SlotIndex, ItemId, TargetSeat(255=NoTarget), ReadyServerTick(**int**) }
+  - ⚠ **ReadyServerTick** = `NetworkManager.Singleton.ServerTime.Tick` at Rpc receive (P2 해결)
+  - **`int` 타입** — `NetworkTime.Tick`은 `int` (NGO NetworkTime.cs:65 확인, P1 v5.2)
+  - RPC 도착은 FixedUpdate 기준이 아니므로 float timestamp 대신 서버 NetworkTick 사용
+  - 결정적 행동 순서 보장: 방어 우선 → ReadyServerTick 오름차순 → 온도 낮은 순 → seat index
+- [ ] B-1b. QueuedAction.TargetSeat 추가
+- [ ] B-1c. PlayerState._pendingIntent 보존 (미니게임 경유, 재검증)
+- [ ] B-1d. IPlayerTurnCancellation 확장
+- [ ] B-1e. ILocalPlayerCommands + LocalPlayerCommandAdapter 확장
+
+### B-2. 아이템 타겟
+
+- [ ] B-2a. TargetMode enum: Self, SingleTarget
+- [ ] B-2b. 21종: SingleTarget **13종** (타로 포함), Self 8종
+- [ ] B-2c. 드래그-타겟 UI (1v1 자동 타겟)
+- [ ] B-2d. 서버 검증
+
+### B-3. Value-Type Snapshots (P1 해결)
+
+> **계약**: factory가 모든 배열을 **defensive copy**로 생성. Resolver는 입력 배열을 **변경하지 않음** (readonly 참조 + 문서화된 불변식).
+
+- [ ] B-3a. `GameModeRuleSnapshot` readonly struct — IGameModeRule 전체 value copy
+  - Factory: `GameModeRuleSnapshot.From(IGameModeRule rule)` — 배열 필드는 `.ToArray()` copy
+- [ ] B-3b. `ItemEffectRuleSnapshot` readonly struct (B3 해결 — **계산 규칙 캡처, 결과 아님**):
+  ```csharp
+  readonly struct ItemEffectRuleSnapshot
+  {
+      // 공통 식별
+      public readonly short ItemId;
+      public readonly ItemCategory Category;
+      public readonly TargetMode TargetMode;
+      public readonly DamageFilter AttackFilter;
+      public readonly ItemEffectKind EffectKind;  // discriminator
+      
+      // Attack 계열
+      public readonly float BaseDamage;           // AttackItemDataSO.Damage 값 복사 (필드명 Damage, B1 v5.5)
+                                                  // Fan(3°), WaterGun(8°) 등. BuldakNoodles는 Buff임!
+      public readonly bool EqualizeToUserTemp;    // B3 v5.2: Equalize = target.temp을 user.temp으로 설정 (평균 아님!)
+                                                  // (AttackItemDataSO.cs:13 확인)
+      
+      // Defense 계열
+      public readonly bool IsDefense;
+      public readonly float DefenseReduction;
+      
+      // Recovery 계열 (B3 v5.2: HealPerUse[] 배열 기반으로 교정)
+      public readonly float[] HealPerUse;         // RecoveryItemDataSO.HealPerUse 배열 defensive copy
+                                                  // (RecoveryItemDataSO.cs:9 확인)
+      public readonly int MaxUses;                // RecoveryItemDataSO.MaxUses
+                                                  // Resolver: HealPerUse[Clamp(MaxUses - RemainingUses, 0, len-1)]
+      
+      // Fan/Status 변경
+      public readonly bool WritesFanSpeed;
+      public readonly float FanSpeedValue;
+      public readonly bool WritesTargetFanSpeed;
+      public readonly float TargetFanSpeedValue;
+      public readonly bool BlocksTargetBasics;
+      
+      // Special 효과
+      public readonly bool GrantsExtraAction;
+      public readonly bool RequiresTargetReady;   // B3 v5.2: Tarot은 target의 IsReady.Value 확인 (intent 아님!)
+                                                  // (SpecialItemDataSO.cs:17 확인)
+      public readonly bool NeutralizesTarget;
+      public readonly SpecialEffectType SpecialKind; // FanSpeedChange, ExtraAction, RevealOpponent만
+                                                    // (Cat/Claw는 SabotageItemDataSO → EffectKind=Sabotage)
+      
+      // Inventory mutation
+      public readonly InventoryMutationType InventoryAction;
+      
+      // Buff/Debuff 즉시 온도 변화 (B3 v5.4 추가)
+      // signed: >0 = heal, <0 = damage (Soda: self -5, Samgyetang: target +3)
+      public readonly float ImmediateTempDelta;
+      public readonly bool IsSelfTarget;            // Buff: true (self), Debuff: false (target)
+      
+      // Scheduled (지연) 효과
+      public readonly bool HasScheduledEffect;
+      public readonly EffectType ScheduledType;
+      public readonly float ScheduledValue;         // signed: Soda delayed=+15, Samgyetang delayed=-7
+      public readonly int ScheduledDelay;
+  }
+  
+  enum ItemEffectKind : byte
+  {
+      DirectDamage,    // 고정 피해
+      Equalize,        // target.temp = user.temp (평균 아님! B3 v5.2)
+      Recovery,        // 회복 (HealPerUse[] 배열 lookup)
+      Defense,         // 방어
+      FanControl,      // 선풍기/업그레이드
+      Sabotage,        // 방해 (BlockBasics 등)
+      Special,         // 타로(RevealOpponent), Screwdriver(FanSpeedChange→FanControl) 등
+                       // ⚠ Cat/ClawMachine은 SabotageItemDataSO → Sabotage kind임
+      Buff,            // 버프 (ImmediateTempDelta + DelayedTempDelta, self)
+      Debuff,          // 디버프 (ImmediateTempDelta + DelayedTempDelta, target)
+      Scheduled        // 지연 효과만
+  }
+  ```
+  - Factory: `ItemEffectRuleSnapshot.From(ItemDataSO so)` — SO의 **정적 파라미터** 복사 (ComputeEffect 결과 아님!)
+    - Recovery: `HealPerUse = so.HealPerUse.ToArray()` (defensive copy), `MaxUses = so.MaxUses`
+    - Attack: `EqualizeToUserTemp = so.EqualizeToUserTemp`
+    - **Buff (B3 v5.4)**: `ImmediateTempDelta = so.ImmediateTempDelta`, `IsSelfTarget = true`,
+      `HasScheduledEffect = !Approximately(so.DelayedTempDelta, 0)`,
+      `ScheduledValue = so.DelayedTempDelta`, `ScheduledDelay = so.DelayTurns`
+    - **Debuff (B3 v5.4)**: `ImmediateTempDelta = so.ImmediateTempDelta`, `IsSelfTarget = false`,
+      `AttackFilter = so.AttackFilter`,
+      `HasScheduledEffect = !Approximately(so.DelayedTempDelta, 0)`,
+      `ScheduledValue = so.DelayedTempDelta`, `ScheduledDelay = so.DelayTurns`
+
+  **공통 할당 공식 (v5.6 보강)**:
+  ```
+  // TargetMode (모든 subclass 공통):
+  TargetMode = IsSelfTarget ? TargetMode.Self : TargetMode.SingleTarget;
+  
+  // ScheduledType (지연 효과가 있을 때):
+  // Buff/Debuff: ScheduledType = EffectType.TempChange
+  // Special(FanSpeedChange, DelayTurns>0): ScheduledType = EffectType.FanSpeedChange
+  ```
+
+  **7개 subclass exhaustive From() 매핑 (B1 v5.5 — 코드 필드명 검증 완료)**:
+  ```csharp
+  // Factory: exhaustive switch on SO subclass type — 미지 subclass는 InvalidOperationException
+  static ItemEffectRuleSnapshot From(ItemDataSO so) => so switch
+  {
+      AttackItemDataSO a   => /* DirectDamage or Equalize */,
+      RecoveryItemDataSO r => /* Recovery */,
+      DefenseItemDataSO d  => /* Defense */,
+      BuffItemDataSO b     => /* Buff */,
+      DebuffItemDataSO db  => /* Debuff */,
+      SabotageItemDataSO s => /* Sabotage */,
+      SpecialItemDataSO sp => /* Special or FanControl */,
+      _ => throw new InvalidOperationException($"Unknown SO type: {so.GetType().Name}")
+  };
+  ```
+
+  **필드 매핑 상세 (B1 v5.5 — 실제 필드명)**:
+
+  **1) AttackItemDataSO** → `EffectKind = EqualizeToUserTemp ? Equalize : DirectDamage`
+  ```
+  BaseDamage = so.Damage              // ⚠ 필드명 "Damage" (BaseDamage 아님! AttackItemDataSO.cs:9)
+  EqualizeToUserTemp = so.EqualizeToUserTemp
+  AttackFilter = so.AttackFilter      // DamageFilter (DefenseItemDataSO.cs:11와 동일 enum)
+  ```
+  - Assets: Fan(3°), HandFan, IceCream, IcedAmericano, HugTshirt, WaterGun(8°)
+
+  **2) RecoveryItemDataSO** → `EffectKind = Recovery`
+  ```
+  HealPerUse = so.HealPerUse.ToArray()   // defensive copy (RecoveryItemDataSO.cs:9)
+  MaxUses = so.MaxUses                    // base ItemDataSO.MaxUses
+  IsSelfTarget = true
+  ```
+  - Assets: WarmTea, HotAmericano, HotPack(12°), Smartphone(4→6→7°)
+
+  **3) DefenseItemDataSO** → `EffectKind = Defense`
+  ```
+  IsDefense = true
+  DefenseReduction = so.BlockAmount       // ⚠ 필드명 "BlockAmount" (DefenseItemDataSO.cs:10)
+  AttackFilter = so.Filter                // ⚠ 필드명 "Filter" (DefenseItemDataSO.cs:11)
+  IsSelfTarget = true
+  ```
+  - Assets: Windbreaker, Mask
+
+  **4) BuffItemDataSO** → `EffectKind = Buff`
+  ```
+  ImmediateTempDelta = so.ImmediateTempDelta  // signed: >0=heal, <0=damage (self)
+  IsSelfTarget = true
+  HasScheduledEffect = !Approximately(so.DelayedTempDelta, 0)
+  ScheduledValue = so.DelayedTempDelta
+  ScheduledDelay = so.DelayTurns
+  ```
+  - Assets: Soda(immediate=-5, delayed=+15), BuldakNoodles(immediate=0, delayed=+20)
+  - ⚠ BuldakNoodles는 BuffItemDataSO (AttackItemDataSO 아님! Assets/Data/Items/Random/Buff/ 폴더)
+
+  **5) DebuffItemDataSO** → `EffectKind = Debuff`
+  ```
+  ImmediateTempDelta = so.ImmediateTempDelta  // signed: >0=target heal, <0=target damage
+  IsSelfTarget = false
+  AttackFilter = so.AttackFilter              // DamageFilter (방어 체크용)
+  HasScheduledEffect = !Approximately(so.DelayedTempDelta, 0)
+  ScheduledValue = so.DelayedTempDelta
+  ScheduledDelay = so.DelayTurns
+  ```
+  - Assets: Samgyetang(immediate=+3 target heal, delayed=-7)
+
+  **6) SabotageItemDataSO** → `EffectKind = Sabotage`
+  ```
+  // ⚠ B1 v5.5: 이전 버전에서 누락된 subclass!
+  // SabotageType enum (ItemEnums.cs:9): Reroll, Steal, BlockBasic, Neutralize
+  InventoryAction = so.SabotageType switch {
+      Reroll => InventoryMutationType.RerollTarget,
+      Steal  => InventoryMutationType.StealFromTarget,
+      _      => InventoryMutationType.None
+  }
+  BlocksTargetBasics = (so.SabotageType == SabotageType.BlockBasic)
+  NeutralizesTarget = (so.SabotageType == SabotageType.Neutralize)
+  IsSelfTarget = false                        // 항상 대상 지정
+  ```
+  - Assets: Cat(Reroll), ClawMachine(Steal), BlueTape(BlockBasic), RedCard(Neutralize)
+  - ⚠ Cat은 SabotageItemDataSO (SpecialItemDataSO 아님! YAML m_EditorClassIdentifier 확인)
+  - ⚠ ClawMachine도 SabotageItemDataSO
+
+  **7) SpecialItemDataSO** → `EffectKind = so.SpecialEffect switch { FanSpeedChange => FanControl, _ => Special }`
+  ```
+  // SpecialEffectType enum (ItemEnums.cs:23): FanSpeedChange, ExtraAction, RevealOpponent
+  WritesFanSpeed = (so.SpecialEffect == FanSpeedChange && so.DelayTurns == 0 && so.TargetsSelf)
+  FanSpeedValue = so.EffectValue
+  WritesTargetFanSpeed = (so.SpecialEffect == FanSpeedChange && so.DelayTurns == 0 && !so.TargetsSelf)
+  TargetFanSpeedValue = so.EffectValue
+  IsSelfTarget = so.TargetsSelf
+  HasScheduledEffect = (so.SpecialEffect == FanSpeedChange && so.DelayTurns > 0)
+  ScheduledValue = so.EffectValue
+  ScheduledDelay = so.DelayTurns
+  GrantsExtraAction = (so.SpecialEffect == ExtraAction)
+  RequiresTargetReady = (so.SpecialEffect == RevealOpponent)  // Tarot: CanUse → IsReady.Value 체크
+  ```
+  - Assets: TarotCard(RevealOpponent), Screwdriver(FanSpeedChange, EffectValue=2, TargetsSelf=false, DelayTurns=0)
+
+  **21개 asset golden test 기댓값 (B1 v5.6 — 전수 asset 검증 완료, ? 값 없음)**:
+  ```
+  DamageFilter enum: 0=Temperature, 1=Food, 2=All
+  SabotageType enum: 0=Reroll, 1=Steal, 2=BlockBasic, 3=Neutralize
+  SpecialEffectType enum: 0=FanSpeedChange, 1=ExtraAction, 2=RevealOpponent
+
+  | # | Asset | SO Type | EffectKind | TargetMode | 주요 필드 기댓값 |
+  |---|-------|---------|------------|------------|-----------------|
+  | 1 | Fan | Attack | DirectDamage | SingleTarget | Damage=3, Filter=Temperature, MaxUses=0(unlimited) |
+  | 2 | HandFan | Attack | DirectDamage | SingleTarget | Damage=2, Filter=Temperature |
+  | 3 | IceCream | Attack | DirectDamage | SingleTarget | Damage=5, Filter=Food |
+  | 4 | IcedAmericano | Attack | DirectDamage | SingleTarget | Damage=5, Filter=Food |
+  | 5 | WaterGun | Attack | DirectDamage | SingleTarget | Damage=8, Filter=Temperature, Equalize=false |
+  | 6 | HugTshirt | Attack | Equalize | SingleTarget | Damage=0, EqualizeToUserTemp=true |
+  | 7 | Windbreaker | Defense | Defense | Self | BlockAmount=2, Filter=Temperature, MaxUses=0(unlimited) |
+  | 8 | Mask | Defense | Defense | Self | BlockAmount=float.MaxValue, Filter=Food |
+  | 9 | WarmTea | Recovery | Recovery | Self | HealPerUse=[7], MaxUses=1 |
+  | 10 | HotAmericano | Recovery | Recovery | Self | HealPerUse=[5], MaxUses=1 |
+  | 11 | HotPack | Recovery | Recovery | Self | HealPerUse=[12], MaxUses=1 |
+  | 12 | Smartphone | Recovery | Recovery | Self | HealPerUse=[4,6,7], MaxUses=3 |
+  | 13 | Soda | Buff | Buff | Self | ImmTempDelta=-5, Delayed=+15, DelayTurns=1, SchedType=TempChange |
+  | 14 | BuldakNoodles | Buff | Buff | Self | ImmTempDelta=0, Delayed=+20, DelayTurns=1, SchedType=TempChange |
+  | 15 | Samgyetang | Debuff | Debuff | SingleTarget | ImmTempDelta=+3, Delayed=-7, DelayTurns=1, Filter=Food, SchedType=TempChange |
+  | 16 | Cat | Sabotage | Sabotage | SingleTarget | SabotageType=Reroll → InventoryAction=RerollTarget |
+  | 17 | ClawMachine | Sabotage | Sabotage | SingleTarget | SabotageType=Steal → InventoryAction=StealFromTarget |
+  | 18 | BlueTape | Sabotage | Sabotage | SingleTarget | SabotageType=BlockBasic → BlocksTargetBasics=true |
+  | 19 | RedCard | Sabotage | Sabotage | SingleTarget | SabotageType=Neutralize → NeutralizesTarget=true |
+  | 20 | TarotCard | Special | Special | SingleTarget | SpecialEffect=RevealOpponent, RequiresTargetReady=true |
+  | 21 | Screwdriver | Special | FanControl | SingleTarget | SpecialEffect=FanSpeedChange, EffectValue=2, TargetsSelf=false, DelayTurns=0, WritesTargetFanSpeed=true, SchedType=FanSpeedChange(지연시) |
+  ```
+
+  **Resolver 규칙 (B3 v5.4 + B1 v5.5 확장)**:
+  ```
+  // Buff (IsSelfTarget=true):
+  //   ImmediateTempDelta > 0 → UserHeal = ImmediateTempDelta
+  //   ImmediateTempDelta < 0 → UserDamage = -ImmediateTempDelta
+  //   HasScheduled → ScheduledEffect on user seat
+  //
+  // Debuff (IsSelfTarget=false):
+  //   방어 체크: target의 ActiveDefense vs AttackFilter
+  //   ImmediateTempDelta > 0 → TargetHeal = ImmediateTempDelta  (Samgyetang: +3 회복)
+  //   ImmediateTempDelta < 0 → TargetDamage = -ImmediateTempDelta
+  //   HasScheduled → ScheduledEffect on target seat
+  //
+  // Sabotage:
+  //   InventoryAction → InventoryDelta (RerollTarget / StealFromTarget)
+  //   BlocksTargetBasics → ModifierDelta
+  //   NeutralizesTarget → ModifierDelta
+  //
+  // Defense:
+  //   SetUserDefense { Filter=rule.AttackFilter, BlockAmount=rule.DefenseReduction }
+  ```
+    - Special: `RequiresTargetReady = (so.SpecialEffect == RevealOpponent)` (Tarot)
+  - ⚠ **Resolver 책임**: ItemEffectKind별 분기 + MatchCombatSnapshot 런타임 상태로 최종 효과 계산 (B3 v5.2 교정)
+    - **Equalize**: `target.newTemp = snapshot.Temperatures[user]` (target 온도를 user 온도로 설정, 평균 아님)
+    - **Recovery**: `heal = rule.HealPerUse[Clamp(rule.MaxUses - inventory.Slots[slot].RemainingUses, 0, rule.HealPerUse.Length-1)]`
+      (RecoveryItemDataSO.cs:13-14 수식 그대로)
+    - **RequiresTargetReady**: Resolver가 target의 `IsReady` **상태** 확인 (intent 존재 여부 아님, SpecialItemDataSO.cs:17)
+- [ ] B-3c. `InventorySnapshot` readonly struct (seat별): `{ byte SeatIndex, SlotSnapshot[] Slots }`
+  - `SlotSnapshot { short ItemId, bool IsUnlimited, byte RemainingUses }`
+  - Factory: defensive `.ToArray()` copy
+- [ ] B-3d. `ScheduledEffectSnapshot` readonly struct: `{ byte TargetSeat, byte SourceSeat, EffectType Type, float Value, int TurnsRemaining }`
+
+### B-4. Functional Core (B4 해결 — 완전한 delta)
+
+- [ ] B-4a. `MatchCombatSnapshot` — **순수 value-type만, defensive copy** + **ISeatStateAccessor read (B2 v5.5)**:
+  ```
+  float[] TemperaturesAtTurnStart      // seat-indexed, copy
+  float[] CurrentTemperatures          // seat-indexed, copy
+  PlayerModifiers[] Modifiers          // value struct copy
+  LifeState[] LifeStates               // copy
+  InventorySnapshot[] Inventories
+  ScheduledEffectSnapshot[] ScheduledEffects
+  int[] CurrentKillScores              // copy (WinnerMask는 Shell이지만 Deathmatch grant 판단용)
+  bool[] IsReady                       // seat-indexed (B2 v5.3 + B2 v5.5 read 경로 교정)
+  EnvironmentType Environment
+  GameModeRuleSnapshot Rule
+  ItemEffectRuleSnapshot[] ItemRules   // copy
+  ```
+  
+  **MatchCombatSnapshotFactory (B2 v5.5 추가)**:
+  ```csharp
+  // ⚠ B2 v5.5: 모든 read를 ISeatStateAccessor 경유
+  // PlayerState 직접 읽기 금지 — snapshot 생성 시점에 이미 disconnect된 seat 가능
+  //
+  // ISeatStateAccessor로 읽는 필드:
+  //   Temperatures = accessor.GetTemperature(seat)
+  //   LifeStates   = accessor.GetLifeState(seat)
+  //   Modifiers    = accessor.GetModifiers(seat)
+  //   Inventories  = accessor.GetInventorySlots(seat) → InventorySnapshot로 변환
+  //   FanSpeed (PlayerStateDelta 계산 base) = accessor.GetFanSpeed(seat)
+  //
+  // ISeatStateAccessor 범위 밖 NV (P2 v5.4 정의):
+  //   IsReady = accessor.IsConnected(seat) ? playerRegistry.Get(seat).IsReady.Value : false
+  //     → disconnect된 seat = false (무행동, pending intent 이미 취소됨)
+  //   HasSelectedItem은 snapshot에 불필요 (intent에 이미 포함)
+  //
+  // Disconnect된 타겟에 대한 정책:
+  //   - Snapshot 시점에 disconnect → 해당 seat의 SeatRuntimeState에서 읽기 (accessor 내부)
+  //   - Snapshot과 Resolution 사이에 disconnect → Applicator가 accessor로 write (B2 v5.4)
+  //   - 타겟이 disconnect 상태여도 행동 **적용** (auto-ready=무행동이므로 타겟만 됨)
+  //   - 타겟이 Ghost 상태면 행동 **취소** (기존 규칙 유지)
+  ```
+- [ ] B-4b. `MultiCombatResolution` — **전체 state delta** (B4):
+  ```
+  CombatEvent[] OrderedEvents          // ≤ MAX_EVENTS(16)
+  float[] TemperatureDeltas            // seat-indexed
+  DamageSource[] LastDamageSources     // seat-indexed
+  byte DeadMask
+  int[] ActionOrder
+  short[] MainItemIds                  // seat-indexed
+  short[] SubItemIds                   // seat-indexed
+  
+  // 완전한 state deltas:
+  InventoryDelta[] InventoryChanges    // 아이템 소비, Cat reroll, Claw steal
+  PlayerStateDelta[] PlayerStateChanges // ← 신규: FanSpeed, IsFanUpgraded, IsBasicBlocked 등 NV write
+  ModifierDelta[] ModifierChanges      // ActiveDefense, ActionNeutralized, HasExtraAction, OpponentRevealed
+  ScheduledEffectDelta[] NewScheduled  // 지연 효과 예약 (with SourceSeat)
+  ```
+  - `PlayerStateDelta`:
+    ```
+    struct PlayerStateDelta
+    {
+        byte SeatIndex;
+        float? NewFanSpeed;            // WriteUserFanSpeed/WriteTargetFanSpeed
+        bool? IsFanUpgraded;           // 현행 코드에 존재 시
+        bool? IsBasicBlocked;          // BlockTargetBasics
+    }
+    ```
+  - ⚠ **WinnerMask, ResultSequence 미포함** → Shell 결정
+- [ ] B-4c. `CombatResolver.ResolveMulti(MatchCombatSnapshot, ActionIntent[])` → `MultiCombatResolution`:
+  - **NV/MonoBehaviour/SO runtime instance 참조 없음**
+  - ItemEffectRuleSnapshot의 ItemEffectKind별 분기 + MatchCombatSnapshot 런타임 상태로 효과 계산 (B3 v5.2 교정):
+    - DirectDamage: `delta = -rule.BaseDamage` 적용 (rule.BaseDamage = AttackItemDataSO.Damage 복사값)
+    - **Equalize**: `target.newTemp = snap.Temps[user]` (target 온도를 user 온도로 설정, 평균 아님!)
+      `delta = snap.Temps[user] - snap.Temps[target]`
+    - **Recovery**: `useIndex = rule.MaxUses - snap.Inventories[seat].Slots[slot].RemainingUses`
+      `heal = rule.HealPerUse[Clamp(useIndex, 0, rule.HealPerUse.Length-1)]`
+      (RecoveryItemDataSO.cs:13-14 로직 그대로 복제)
+    - **RequiresTargetReady (Tarot)**: target의 `IsReady` 상태 확인 (intent 존재 여부 아님!)
+      `if (rule.RequiresTargetReady && !snap.IsReady[target]) → reveal 실패`
+  - 행동 순서: 방어 우선 → **ReadyServerTick** 오름차순 → 온도 낮은 순 → **seat index** (최종 tie-break)
+  - 중간 사망: 매 행동 후 0° 체크, 사망자 행동 취소
+  - Target이 실행 전 Ghost → 행동 **취소** (재지정 안 함)
+  - 기존 `Resolve(p1, p2)` 완전 보존
+- [ ] B-4d. **Applicator Shell — ISeatStateAccessor 경유 (B2 v5.4)**:
+  ```
+  ⚠ B2 v5.4: 모든 NV write를 ISeatStateAccessor 경유.
+  PlayerState 직접 참조 금지 — disconnect된 타겟에도 안전하게 적용.
+  (Snapshot 시점에 online이었던 타겟이 Resolution까지 disconnect될 수 있음)
+
+  1. resolution.TemperatureDeltas → ISeatStateAccessor.SetTemperature(seat, newTemp)
+  2. resolution.PlayerStateChanges:
+     → ISeatStateAccessor.SetFanSpeed(seat, value)
+     → ISeatStateAccessor.SetIsFanUpgraded(seat, value)
+     → ISeatStateAccessor.SetIsBasicBlocked(seat, value)
+     → ISeatStateAccessor.SetIsFanActive(seat, value) [P3 반영]
+  3. resolution.InventoryChanges → ISeatStateAccessor.SetInventorySlots(seat, slots)
+  4. resolution.ModifierChanges → ISeatStateAccessor.SetModifiers(seat, mods)
+  5. resolution.NewScheduled → BuffDebuffSystem 등록 (with SourceSeat)
+  6. FlushDeathQueue() → TryKill(seat, source) — ISeatStateAccessor 경유
+  7. KillScores 반영 → WinnerMask 계산 (Shell)
+  8. ResultSequence = ++_serverSequenceCounter (Shell)
+  9. CombatResolutionBatchNetData 생성 + ClientRpc
+  ```
+
+### B-5. Network DTO — 수동 직렬화 (B5 해결)
+
+- [ ] B-5a. `CombatEventNetData`:
+  ```csharp
+  struct CombatEventNetData : INetworkSerializable
+  {
+      public byte ActorSeat;     // 1
+      public byte TargetSeat;    // 1
+      public short ItemId;       // 2
+      public byte EventType;     // 1
+      public float Value;        // 4
+      public byte Flags;         // 1
+      // = 10 bytes per event
+      
+      public void NetworkSerialize<T>(BufferSerializer<T> s) where T : IReaderWriter
+      {
+          s.SerializeValue(ref ActorSeat);
+          s.SerializeValue(ref TargetSeat);
+          s.SerializeValue(ref ItemId);
+          s.SerializeValue(ref EventType);
+          s.SerializeValue(ref Value);
+          s.SerializeValue(ref Flags);
+      }
+  }
+  ```
+- [ ] B-5b. **이벤트 생성 불변식**: 1 action → 최대 1 event. 4인 최대: 4 main + 4 sub + 4 defense + 4 death = 16
+- [ ] B-5c. `CombatResolutionBatchNetData : INetworkSerializable` — **수동 요소별 직렬화** (B4 해결):
+  ```csharp
+  public void NetworkSerialize<T>(BufferSerializer<T> s) where T : IReaderWriter
+  {
+      s.SerializeValue(ref SeatCount);
+      s.SerializeValue(ref EventCount);
+      
+      // ── Writer-side null/length 검증 (P2 v5.2) ──
+      if (!s.IsReader)
+      {
+          if (Events == null || TempBefore == null || TempAfter == null ||
+              MainItemIds == null || SubItemIds == null || ActionOrder == null)
+              throw new System.InvalidOperationException("Writer: null array detected");
+          if (EventCount > Events.Length)
+              throw new System.InvalidOperationException("EventCount exceeds Events array");
+          if (SeatCount > TempBefore.Length || SeatCount > TempAfter.Length ||
+              SeatCount > MainItemIds.Length || SeatCount > SubItemIds.Length ||
+              SeatCount > ActionOrder.Length)
+              throw new System.InvalidOperationException("SeatCount exceeds seat array");
+      }
+      
+      // ── Reader-side 배열 초기화 (B4: struct default → 배열 null 방지) ──
+      if (s.IsReader)
+      {
+          Events ??= new CombatEventNetData[16];
+          TempBefore ??= new float[4];
+          TempAfter ??= new float[4];
+          MainItemIds ??= new short[4];
+          SubItemIds ??= new short[4];
+          ActionOrder ??= new int[4];
+      }
+      
+      // ── 범위 검증 (양측) ──
+      if (SeatCount > 4)
+          throw new System.InvalidOperationException($"SeatCount {SeatCount} > 4");
+      if (EventCount > 16)
+          throw new System.InvalidOperationException($"EventCount {EventCount} > 16");
+      
+      // ── 요소별 수동 직렬화 (FixedList512Bytes 직접 직렬화 불가) ──
+      for (int i = 0; i < EventCount; i++)
+          Events[i].NetworkSerialize(s);
+      
+      // ── 고정 길이 배열 (SeatCount 기준) ──
+      for (int i = 0; i < SeatCount; i++) s.SerializeValue(ref TempBefore[i]);
+      for (int i = 0; i < SeatCount; i++) s.SerializeValue(ref TempAfter[i]);
+      for (int i = 0; i < SeatCount; i++) s.SerializeValue(ref MainItemIds[i]);
+      for (int i = 0; i < SeatCount; i++) s.SerializeValue(ref SubItemIds[i]);
+      for (int i = 0; i < SeatCount; i++) s.SerializeValue(ref ActionOrder[i]);
+      
+      s.SerializeValue(ref DeadMask);
+      s.SerializeValue(ref WinnerMask);
+      s.SerializeValue(ref FirstActionSeat);
+      s.SerializeValue(ref ResultSequence);
+  }
+  ```
+  - Events 저장: `CombatEventNetData[] Events = new CombatEventNetData[16]` (고정 배열, EventCount로 유효 범위)
+  - **FixedList512Bytes 사용하지 않음** — NGO 2.11.2 BufferSerializer에 직접 오버로드 없으므로
+  - 총 크기: 2(header) + 10×16(worst) + 4×5×4(seat arrays) + 4(masks) + 4(seq) = ~246 bytes (1200 MTU 이내)
+- [ ] B-5d. Overflow → state 적용 전 abort → match 강제 종료 (재시도 안 함)
+- [ ] B-5e. 1v1: 기존 Resolve() + CombatResultData 보존
+
+### B-6. Balance
+
+- [ ] B-6a. 모든 랜덤 경로에 MaxRandomItems cap + GetRandomSlotCount() 헬퍼
+- [ ] B-6b. 바람막이 Multi 1-use: InitializeBasicItems에 IGameModeRule → `IsUnlimited=false, RemainingUses=1`
+- [ ] B-6c. 타로: Multi ItemDropTable 생성 시 필터링 (SO weight 변경 안 함)
+- [ ] B-6d. Deathmatch: `min(Rule.DeathmatchGrantCount, cap - currentRandom)` (라운드 1회)
+- [ ] B-6e. 동시 Ready 판정 = 동일 ReadyServerTick (NetworkManager.ServerTime.Tick) [P2]
+
+### B-7. TurnManager N인
+
+- [ ] B-7a. 동적 배열 — PlayerState[] 고정 2→동적. **1v1 영향:** 배열 크기 2로 동일, 인덱싱 로직 seat 기반 전환
+- [ ] B-7b. PrepPhase N명 루프 — **공유 코드 변경:** for문 상한 N, Ready barrier N명 대기, 타이머 로직 공유. 1v1은 N=2로 동작 동일해야 함
+- [ ] B-7c. AttackPhase: Multi → snapshot + ResolveMulti + Applicator, 1v1 → **기존 CombatResolver.Resolve() 보존** (IGameModeRule 분기)
+- [ ] B-7d. BuffDebuffSystem N인 확장 — **공유 코드 변경:** seat 순회 N명. 1v1은 2-seat 순회로 기존 동작 보존 필수
+- [ ] B-7e. **1v1 격리 조건:** B-7a~d의 공유 코드 변경 후 반드시 2인 Prep→Attack→Resolution→RoundReset 전체 사이클 회귀 테스트
+
+### B-8. 통합 테스트
+
+- [ ] B-8a. 3인 드래그-타겟 → 전투
+- [ ] B-8b. 미니게임 타겟 보존
+- [ ] B-8c. 중간 사망 → 행동 취소
+- [ ] B-8d. Target Ghost → 취소
+- [ ] B-8e. 5킬 + 공동 승리 (WinnerMask Shell)
+- [ ] B-8f. 밸런스: 바람막이 1-use, 타로 필터, 초기 2개, Deathmatch cap
+- [ ] B-8g. DTO: 수동 직렬화 정상 + MTU
+- [ ] B-8h. 1v1 회귀 (조건부 안전 — 아래 전체 체크리스트 통과 필수):
+  - [ ] B-8h-1. 1v1 seat resolution: 2-seat MatchRoster 생성 + GetSeat(clientId) 정상
+  - [ ] B-8h-2. 2인 PrepPhase: N명 루프에서 N=2 Ready barrier + 타이머 정상
+  - [ ] B-8h-3. 2인 AttackPhase: IGameModeRule 분기 → 기존 CombatResolver.Resolve() 호출 확인
+  - [ ] B-8h-4. 2인 round reset: FanSpeed=1f, IsFanActive=false, BuffDebuffSystem 2-seat 순회
+  - [ ] B-8h-5. 1v1 disconnect: DisconnectDispatcher default(PlayerSpawnManager) → 즉시 Despawn+Destroy (30초 grace 미적용). TurnManager barrier/rematch observer 정상 실행
+  - [ ] B-8h-6. Multi→Lobby→1v1 전환: DisconnectDispatcher default(PlayerSpawnManager) 복원 확인
+  - [ ] B-8h-7. 1v1 Rematch: BootstrapNewMatch 후 ParticipantId→seat 및 PlayerRegistry binding 보존. Match runtime state만 초기화. Dispatcher handler 중복 등록 없음
+  - [ ] B-8h-8. 공유 UI: GameDataBridge/RoundResultPresenter/GameHudBuilder 1v1 정상 렌더링
+  - [ ] B-8h-9. PlayerState seat 기반 Initialize: SyncedPlayerIndex 정상 할당
+  - [ ] B-8h-10. Roster 미준비 상태 spawn defer: RosterReady 전 PlayerObject 미생성, Ready 후 정확한 seat 위치에 1회만 생성
+  - [ ] B-8h-11. Host + remote client 2라운드 전체 진행: Prep→Attack→Resolution→RoundReset×2 정상
+  - [ ] B-8h-12. 1v1 Prep/Attack/Presentation 각각에서 disconnect → 즉시 Despawn+Destroy + TurnManager barrier 정상 해제
+- [ ] B-8i. Host + remote 3 + 모든 seat 관점
+- [ ] B-8j. PlayerStateDelta: FanSpeed/IsBasicBlocked 정상 적용
+
+---
+
+## Phase C — N인 VFX + 환경
+
+- [ ] C-1a. PresentationBarrier (이미 N인)
+- [ ] C-1b. CombatVFXManager visual slot 매핑
+- [ ] C-1c. 순차 연출 ActionOrder
+- [ ] C-1d. 수동 직렬화 DTO 소비
+- [ ] C-2a. 사망/Ghost 연출 (alpha 0.4)
+- [ ] C-2b. 라운드 종료 연출 + 킬 스코어
+- [ ] C-3a. 잼민이 N스틸
+- [ ] C-3b. 앰뷸런스: 최저 1명 (동률 → seat index 최소)
+- [ ] C-3c. 폭염경보: 오름차순
+- [ ] C-3d. 기타: 전원 동일
+- [ ] C-3e. EnvironmentRuleService + IGameModeRule
+- [ ] C-4a~d. 통합 테스트
+
+---
+
+## Phase D — Ghost Skill + Multiplier + UI
+
+### D-1. PlayerModifiers + 실제 적용
+
+- [ ] D-1a. FanSpeedMultiplier=1f, RecoveryMultiplier=1f 추가
+- [ ] D-1b. ApplyFanTick: `speed = FanSpeed.Value * modifiers.FanSpeedMultiplier`
+- [ ] D-1c. ApplyRecoveryTick: `rate = recoveryRate * modifiers.RecoveryMultiplier`
+- [ ] D-1d. **ChillAura epoch** (P4 해결 — GAME_DESIGN 기준):
+  ```
+  적용: Ghost가 PrepPhase 중 사용 → 즉시 modifier 적용
+  유효: 해당 Prep + Attack + Resolution 동안
+  해제: **다음 PrepPhase 종료 시** (GAME_DESIGN: "until next PrepPhase end")
+  ∴ 실제 지속 = 현재 턴 나머지 + 다음 턴 Prep 전체
+  해제 시점: TurnManager가 다음 PrepPhase → AttackPhase 전환 직전에 ResetChillAura() 호출
+  ```
+
+### D-2. Ghost 스킬 + 쿨다운 (P3 해결)
+
+- [ ] D-2a. **쿨다운 저장소**: `Dictionary<(byte seat, byte skillIndex), int>` (스킬별 개별 쿨다운)
+  - skillIndex: 0=FrostStrike, 1=ChillAura
+  - PrepPhase 시작 시 전원 쿨다운 1 감소
+  - 라운드 리셋 시 전체 클리어
+- [ ] D-2b. **쿨다운 UI 복제**: `NetworkList<GhostCooldownNetData>` in MatchNetworkState (B5 해결):
+  ```csharp
+  // NetworkList<T>의 T 계약: unmanaged + IEquatable<T> + INetworkSerializable
+  public struct GhostCooldownNetData : INetworkSerializable, System.IEquatable<GhostCooldownNetData>
+  {
+      public byte Seat;
+      public byte Skill;           // 0=FrostStrike, 1=ChillAura
+      public byte RemainingTurns;
+      
+      public void NetworkSerialize<T>(BufferSerializer<T> s) where T : IReaderWriter
+      {
+          s.SerializeValue(ref Seat);
+          s.SerializeValue(ref Skill);
+          s.SerializeValue(ref RemainingTurns);
+      }
+      
+      public bool Equals(GhostCooldownNetData other)
+          => Seat == other.Seat && Skill == other.Skill && RemainingTurns == other.RemainingTurns;
+      public override int GetHashCode() => (Seat << 16) | (Skill << 8) | RemainingTurns;
+  }
+  ```
+  - **MatchNetworkState 수명주기**:
+    - `Awake`: `GhostCooldowns = new NetworkList<GhostCooldownNetData>();`
+    - `OnNetworkSpawn`: `GhostCooldowns.OnListChanged += OnCooldownsChanged;`
+    - `OnNetworkDespawn`: `GhostCooldowns.OnListChanged -= OnCooldownsChanged;`
+    - `OnDestroy`: `GhostCooldowns?.Dispose();`
+    - 서버: 쿨다운 변경 시 리스트 동기화 (Add/Remove/Update)
+    - 서버: 라운드 리셋 시 `GhostCooldowns.Clear()`
+  - 클라이언트: Everyone readable → Ghost UI에서 자기 seat의 쿨다운 표시
+- [ ] D-2c. GhostSkillServerRpc 6단계 검증: IsServer, sender==Owner, Ghost, PrepPhase, target Eligible(Connected+Alive), cooldown==0
+- [ ] D-2d. 디버프 덮어쓰기: modifier 원복 → **active debuff entry 제거** → 새 설치 + 새 entry → killerSeat 갱신
+- [ ] D-2e. **Active debuff dictionary**: `Dictionary<byte targetSeat, GhostDebuffEntry>`
+  - `GhostDebuffEntry { byte GhostSeat, byte SkillIndex, int AppliedTurn }`
+  - **ChillAura 만료 시**: modifier 원복 **+ debuff entry 제거**
+  - 라운드 리셋 시 전체 클리어
+- [ ] D-2f. FrostStrike: DamageFilter.Ghost, 즉시 FlushDeathQueue, DamageSource={ghostSeat, GhostFrost}
+- [ ] D-2g. ChillAura: FanSpeedMultiplier=2, RecoveryMultiplier=0.5, DamageSource 갱신
+
+### D-3. Ghost UI
+
+- [ ] D-3a. Ghost PrepPhase UI: 스킬 버튼 2개
+- [ ] D-3b. 타겟 선택: Eligible 생존자 클릭
+- [ ] D-3c. 쿨다운 오버레이 (NetworkList 읽기)
+- [ ] D-3d. PrepPhase 자유, Ready 불필요
+- [ ] D-3e. Ghost 시야에 전원 상태
+
+### D-4. 통합 테스트
+
+- [ ] D-4a. FrostStrike → PrepPhase 즉시 사망 → FlushDeathQueue → 킬 귀속
+- [ ] D-4b. ChillAura → fan ×2 확인 → 간접 킬
+- [ ] D-4c. Recovery ×0.5 확인
+- [ ] D-4d. 덮어쓰기: 2 Ghost 동일 타겟
+- [ ] D-4e. 라운드 종료 → 전원 Alive + 전체 초기화
+- [ ] D-4f. Ghost 5킬 승리
+- [ ] D-4g. **ChillAura 만료**: 다음 PrepPhase 종료 시 해제 + debuff entry 제거
+- [ ] D-4h. **쿨다운 UI**: FrostStrike/ChillAura 개별 표시
+
+---
+
+## Phase E — Solo/Bot
+
+### E-1. Solo 인프라
+
+- [ ] E-1a. Solo 버튼 → 난이도
+- [ ] E-1b. Bot Standalone build 생성
+- [ ] E-1c. 실행: `-batchmode -nographics`
+- [ ] E-1d. **포트 조회** (B6 해결):
+  ```csharp
+  var transport = (UnityTransport)NetworkManager.Singleton.NetworkConfig.NetworkTransport;
+  transport.SetConnectionData("127.0.0.1", 0);  // port 0 = OS ephemeral
+  NetworkManager.Singleton.StartHost();
+  ushort actualPort = transport.GetLocalEndpoint().Port;  // 실제 할당 포트
+  // Bot 프로세스에 --port actualPort 전달
+  ```
+- [ ] E-1e. BotBootstrap.cs: command-line → Transport → Client 연결
+- [ ] E-1f. Connection approval: session-token, seat 1
+- [ ] E-1g. 프로세스 관리: Process.Start → 10초 timeout, ShutdownRpc → 3초 → Kill
+- [ ] E-1h. Auth 미사용, Lobby 미경유, GameScene 공유
+
+### E-2. Bot AI
+
+- [ ] E-2a. IBotBrain BT
+- [ ] E-2b. BotPlayer: PrepPhase → BT → SelectItemServerRpc → delay → ReadyServerRpc
+- [ ] E-2c. 난이도 3종
+- [ ] E-2d. Ready 타이밍
+- [ ] E-2e. 미니게임 IsBot 자동 성공
+
+### E-3. 외형/이름
+
+- [ ] E-3a. Bot 이름
+- [ ] E-3b. 기본 캐릭터
+
+### E-4. 통합 테스트
+
+- [ ] E-4a. Solo → Host → Bot 연결
+- [ ] E-4b. Bot 아이템+Ready
+- [ ] E-4c. Bo3 정상
+- [ ] E-4d. Bot 크래시 감지
+- [ ] E-4e. 매치 종료 → 프로세스 정리
+- [ ] E-4f. token 거절
+
+---
+
+## Phase F — 미해결 질문 + 정리
+
+- [ ] F-1a~h. Q10, Q16, Q21~Q23, Q24, Q26, Q27
+- [ ] F-2a~e. PLAN_019 역사화, PLAN_021 트리, GAME_DESIGN, ACTIVE_CONTEXT, CHANGES
+
+---
+
+## 완료 불변식 (36개)
+
+1. PlayerIndex = seat, match 동안 고정
+2. ClientId/OwnerClientId/PlayerIndex 암묵적 변환 금지
+3. eligible actor당 intent turn당 최대 1
+4. secret intent 비인가 복제 금지
+5. 동일 snapshot+intents → 동일 ordered resolution (tie-break: seat)
+6. Barrier는 Begin 시점 snapshot만 기다림 — reconnect 추가 금지
+7. phase driver와 NV writer 각 하나
+8. 2인 기존 golden result 유지
+9. collection/DTO 4인/16 event bound, 위반=abort
+10. disconnect/despawn/reconnect cleanup idempotent
+11. CombatResolver는 value-type snapshot만 (defensive copy, 배열 미변경)
+12. WinnerMask/ResultSequence는 Shell 결정
+13. KillerSeat=255 → Origin=Natural
+14. 진행 중 Barrier reconnect 추가 금지
+15. ItemEffectRuleSnapshot은 계산 규칙만 (런타임 결과 아님). Resolver가 snapshot 상태로 효과 계산
+16. disconnect 시 pending intent 즉시 취소 (auto-ready = 무행동)
+17. **(v5.2→v5.7)** DontDestroyWithOwner=true: **Multi/Solo** disconnect 시 NGO가 서버 소유 전환 → 라이브 PlayerState에서 NV 읽기 → SeatRuntimeState 추출 → 명시적 Despawn+Destroy. **1v1**은 default PlayerSpawnManager가 즉시 Despawn+Destroy (SeatRuntimeState capture 없음, grace 없음)
+18. **(v5.2)** ISeatStateAccessor: disconnect grace 동안 모든 시스템이 seat 상태 접근 가능 (PlayerState 또는 SeatRuntimeState)
+19. **(v5.2)** Equalize: target.temp = user.temp (평균 아님). Recovery: HealPerUse[MaxUses-RemainingUses]. Tarot: IsReady 상태 확인 (intent 아님)
+20. **(v5.2)** ReadyServerTick은 int (NetworkTime.Tick 타입)
+21. **(v5.2)** DTO writer-side: 모든 배열 null 체크 + count≤length 검증
+22. **(v5.3→v5.5)** ISeatStateAccessor는 disconnect grace 중 보존할 authoritative gameplay state를 커버 (Temperature~IsBasicBlocked + Inventory). IsReady/HasSelectedItem/CosmeticDataNV/SyncedPlayerIndex는 제외 (불변식 30 참조)
+23. **(v5.3)** TryKill/RoundReset은 ISeatStateAccessor 경유 — offline seat도 처리 가능
+24. **(v5.3)** SeatRuntimeState에 ScheduledEffect 중복 보관 금지 — BuffDebuffSystem 중앙만
+25. **(v5.4→v5.7)** Disconnect destructive handler 단일 소유자: Multi/Solo에서 MatchRoster가 유일한 destructive lifecycle handler (Capture→Roster→Despawn). 1v1에서는 default PlayerSpawnManager 유지 (즉시 Despawn+Destroy). TurnManager/SessionManager 비파괴 observer는 양쪽 모두 허용
+26. **(v5.4)** Applicator Shell은 모든 NV write를 ISeatStateAccessor 경유 — PlayerState 직접 참조 금지 (disconnect된 타겟 안전)
+27. **(v5.4)** ItemEffectRuleSnapshot은 Buff/Debuff의 signed ImmediateTempDelta를 표현 (>0=heal, <0=damage)
+28. **(v5.4)** 라운드 리셋 FanSpeed = TemperatureSystem.DEFAULT_FAN_SPEED (1f, 0이 아님) + IsFanActive=false
+29. **(v5.4)** StartHost() 호출 전 사전조건: SessionParticipantTable token 등록 완료 + ConnectionApproval callback 등록
+30. **(v5.4)** ISeatStateAccessor 범위 = "disconnect grace 중 보존할 authoritative gameplay state". IsReady/HasSelectedItem/CosmeticDataNV/SyncedPlayerIndex는 제외 (각각 offline 기본값 명시)
+31. **(v5.5)** ItemEffectRuleSnapshot.From()은 7개 subclass exhaustive switch. 미지 subclass → InvalidOperationException. AttackItemDataSO.Damage (BaseDamage 아님), DefenseItemDataSO.BlockAmount/Filter, SabotageItemDataSO.SabotageType 포함
+32. **(v5.5)** MatchCombatSnapshotFactory는 gameplay state를 ISeatStateAccessor로 read. IsReady = connected ? NV : false
+33. **(v5.5→v5.7)** DisconnectDispatcher(DDOL)는 PlayerObject capture/despawn을 수행하는 유일한 destructive lifecycle handler. IDisconnectHandler 교체로 모드별 분기. TurnManager(barrier/rematch)와 SessionManager의 비파괴 observer 구독은 허용. **MatchCompositionRoot.OnDestroy()**에서 RestoreDefaultIfCurrent + roster.Dispose()로 default(PlayerSpawnManager) 복원
+34. **(v5.5)** 불변식 22와 30은 비모순: 22는 gameplay state 범위, 30은 제외 NV 목록
+35. **(v5.6)** Golden test 21개 asset 전수 검증 — 미확정 값("?") 0개. WaterGun=DirectDamage(Damage=8), HugTshirt=Equalize, BuldakNoodles=Buff(Imm=0,Delayed=+20)
+36. **(v5.6)** MatchRoster는 plain class(IDisconnectHandler+IDisposable). MatchCompositionRoot.OnDestroy()가 RestoreDefaultIfCurrent+Dispose. 초기화 실패 catch 내 복원
+37. **(v5.7)** 1v1 seat resolver 계약: GameScene(index 1)의 MCR가 SessionParticipantTable에서 2-seat MatchRoster hydrate. 동일 `GetSeat(clientId)` 경로로 스폰. MatchRoster는 seat resolution에만 사용하며 DisconnectDispatcher handler는 교체하지 않음 (default PlayerSpawnManager 유지). Spawn은 RosterReady 이후에만 실행 — 미준비 시 pending queue 유지
+38. **(v5.7)** 공유 코드 1v1 회귀 조건: TurnManager(PrepPhase N루프, Ready barrier, BuffDebuffSystem N-seat 순회, round reset)는 N=2에서 기존 동작 보존 필수. AttackPhase는 IGameModeRule 분기로 기존 CombatResolver.Resolve() 경로 격리
+39. **(v5.7)** 모드 전환 안전: Multi→Lobby→1v1 시 DisconnectDispatcher가 default handler(PlayerSpawnManager) 복원. 1v1 Rematch 시 ParticipantId→seat 및 PlayerRegistry binding 보존, match runtime state만 초기화. Dispatcher handler 중복 등록 금지
+
+## 검증 게이트
+
+1. Host + remote 3
+2. 3인/4인 모두
+3. 2번째 라운드 이상 (리셋)
+4. Prep/Attack/VFX 중 disconnect
+5. 모든 local seat 관점 UI
+6. 1v1 회귀 **(조건부 안전)**: seat resolution, 2인 Prep/Attack/round reset, disconnect, Multi→Lobby→1v1 전환, Rematch 회귀 테스트 전체 통과 (B-8h-1~12)
+7. spawn = SpawnPoint[seat]
+8. reconnect → 같은 seat + 새 PlayerState + SeatRuntimeState hydrate NV 값 일치
+9. disconnect 유예 중 라운드 미종료
+10. MatchNetworkState Host 포함 초기화
+11. **(v5.2→v5.7)** Multi/Solo disconnect → 라이브 PlayerState에서 NV 읽기 성공 (DontDestroyWithOwner=true). 1v1은 즉시 Despawn (capture 없음)
+12. **(v5.2)** grace 중 ScheduledEffect/환경이 disconnected seat에 정상 적용 (ISeatStateAccessor)
+13. **(v5.2→v5.3)** Token 2단계 gate: Lobby gate (token ready → relay 코드 배포) + NGO gate (approved count → 씬 전환)
+14. **(v5.3)** TryKill(byte seat) — offline seat에서 ScheduledEffect/환경으로 0°도달 시 Ghost 전환
+15. **(v5.3)** 라운드 리셋 — offline seat도 ISeatStateAccessor로 전체 상태 초기화
+16. **(v5.3)** MatchCombatSnapshot.IsReady[] 존재 → Tarot Resolver 컴파일 성공
+17. **(v5.3)** Reconnect hydrate: SyncedPlayerIndex 마지막 설정 → 반쯤 복원 방지
+18. **(v5.4)** Disconnect 단일 handler: PlayerSpawnManager callback 비활성 → MatchRoster만 실행 → Capture 전 Despawn 없음
+19. **(v5.4)** Applicator Shell: disconnect된 타겟에 ISeatStateAccessor 경유 결과 적용 성공
+20. **(v5.4)** Buff(Soda -5/+15)/Debuff(Samgyetang +3/-7) ItemEffectRuleSnapshot From() → Resolver → 정확한 온도 변화
+21. **(v5.4)** 라운드 리셋 후 FanSpeed==1f (DEFAULT), IsFanActive==false
+22. **(v5.4)** StartHost 전 token table + approval callback 등록 확인
+23. **(v5.5)** 21개 asset From() golden test: 각 SO의 기댓 snapshot 필드값 일치
+24. **(v5.5)** MatchCombatSnapshotFactory: disconnect seat의 Temperature/Modifiers/Inventory를 ISeatStateAccessor로 읽기 성공
+25. **(v5.5)** Disconnect → Lobby 복귀 → 1v1 매치: DisconnectDispatcher가 PlayerSpawnManager handler로 복원됨
+
+## 위험 요소
+
+| 리스크 | 완화 |
+|--------|------|
+| TurnManager 배열 → 1v1 회귀 | 기존 Resolve() 보존 + N=2 회귀 테스트 (B-8h) |
+| 공유 코드 회귀 (v5.7) | 조건부 안전: PrepPhase/BuffDebuff/Ready barrier/round reset N루프 + Dispatcher 전환 + Rematch binding 보존 — B-8h 12건 통과 조건 |
+| PlayerSpawnManager scene 판정 (v5.7) | gameSceneName 단일 문자열 → MCR 존재 + RosterReady 기반 판정. GameScene_Multi/Solo 누락 방지 |
+| Roster 미준비 spawn (v5.7) | pending queue + RosterReady 이벤트. ClientId-as-seat fallback 완전 제거 |
+| CombatResultData 2인 DTO | 1v1 그대로 |
+| Ghost Frost PrepPhase | 즉시 FlushDeathQueue |
+| Solo 별도 프로세스 | GetLocalEndpoint().Port |
+| MCR NV 불가 | MatchNetworkState 분리 |
+| SO in Resolver | value-type snapshot + defensive copy |
+| DTO 직렬화 | 수동 요소별 (FixedList 미사용) |
+| {255,Fan} OOB | Natural 정규화 + guard |
+| Roster/LifeState 중복 | 연결=Roster, 게임=LifeState |
+| Windbreaker unlimited | Multi: IsUnlimited=false |
+| Tarot Self 회귀 | SingleTarget |
+| Multiplier 미적용 | ApplyFanTick/RecoveryTick 수정 |
+| Reconnect NV 소실 | SeatRuntimeState + 새 SpawnAsPlayerObject + hydrate |
+| PlayerObject lookup 미등록 | SeatRuntimeState 방식: 새 spawn이므로 자연 해결 |
+| DontDestroyWithOwner timing (v5.2) | =true 설정: NGO 서버 소유 전환 → 라이브 NV 읽기 가능 |
+| Disconnect grace 중 seat 접근 (v5.2) | ISeatStateAccessor: PlayerState↔SeatRuntimeState 통합 |
+| Disconnect grace vs round end | CountsAsAliveForRoundEnd 분리 |
+| Resolution delta 불완전 | PlayerStateDelta (FanSpeed/IsFanUpgraded/IsBasicBlocked) |
+| Token 전달 Lobby 권한 | 클라이언트 self-write Private → Host 읽기 |
+| ItemRuleSnapshot 런타임 의존 | ItemEffectRuleSnapshot 규칙 캡처 + Resolver 계산 |
+| DTO reader 배열 null | reader-side ??= new + 양측 범위 검증 |
+| GhostCooldownNetData 계약 | unmanaged+IEquatable+INetworkSerializable+lifecycle |
+| ReadyTimestamp 비결정적 | ReadyServerTick int (NetworkTime.Tick) |
+| ChillAura epoch | GAME_DESIGN 기준: 다음 PrepPhase 종료 시 |
+| Equalize 수식 오류 (v5.2) | target.temp=user.temp (평균 아님), EqualizeToUserTemp flag |
+| Recovery 수식 오류 (v5.2) | HealPerUse[] 배열 lookup (baseHeal*remaining 아님) |
+| Tarot 판정 오류 (v5.2) | IsReady 상태 확인 (intent 존재 아님), RequiresTargetReady flag |
+| DTO writer null (v5.2) | writer-side 모든 배열 null+length 검증 |
+| Token Guid 예측가능 (v5.2) | RandomNumberGenerator.GetBytes(32) 사용 |
+| Token ready gate (v5.3) | 2단계: Lobby gate(token ready→relay) + NGO gate(approved→scene) |
+| ISeatStateAccessor 불완전 (v5.3) | 전체 NV 커버 + Inventory + TryKill/RoundReset 경유 |
+| PendingEffects 이중 발동 (v5.3) | SeatRuntimeState에서 제거, BuffDebuffSystem 중앙만 |
+| Reconnect 반쯤 복원 (v5.3) | SyncedPlayerIndex 마지막 설정 + IsHydrated latch |
+| MatchCombatSnapshot.IsReady 누락 (v5.3) | bool[] IsReady 추가 |
+| Disconnect callback 경쟁 (v5.4) | PlayerSpawnManager callback 비활성화, MatchRoster 단일 handler |
+| Applicator PlayerState 직접 참조 (v5.4) | 모든 NV write ISeatStateAccessor 경유 |
+| Buff/Debuff ImmediateTempDelta 누락 (v5.4) | signed ImmediateTempDelta + IsSelfTarget + 21종 From() 매핑 표 |
+| FanSpeed 리셋 0 (v5.4) | DEFAULT_FAN_SPEED(1f) + IsFanActive=false |
+| StartHost 전 token 미등록 (v5.4) | token 등록 + approval callback → StartHost 순서 보장 |
+| ISeatStateAccessor 범위 모호 (v5.4) | gameplay state만 + 제외 NV 4종 offline 기본값 명시 |
+| SO 매핑 필드명 불일치 (v5.5) | 7 subclass exhaustive switch + 실제 필드명 검증 + 21-asset golden test |
+| Snapshot read PlayerState 의존 (v5.5) | MatchCombatSnapshotFactory ISeatStateAccessor read + IsReady fallback |
+| Disconnect handler lifecycle (v5.5) | DisconnectDispatcher DDOL + IDisconnectHandler 교체 + OnDestroy 복원 |
+| 불변식 22↔30 모순 (v5.5) | 22번 문구 "authoritative gameplay state" + 30 참조로 통일 |
+| Golden test 미확정 값 (v5.6) | 21개 asset YAML 전수 검증, ? 값 0개 |
+| Dispatcher cleanup owner (v5.6) | MatchRoster=plain class, MCR.OnDestroy()가 RestoreDefaultIfCurrent+Dispose |
+
+
+
+---
+
+## END OF PLAN
+
+Review the full plan above with focus on the 4 fixes from Review #15. Output:
+
+```
+## Review #16 — PLAN_025 v5.7 (Final)
+
+**Score: X.X / 10**
+
+### Fix Verification
+1. B1 (nullable ClientId): [fixed/still broken]
+2. H1 (seat allocation owner): [fixed/still broken]
+3. H2 (PSM callback removal): [fixed/still broken]
+4. H3 (server-only roster): [fixed/still broken]
+
+### Cross-Reference Consistency
+- A-3a ↔ A-3b ↔ A-3e ↔ A-4b ↔ A-6f: [consistent/contradicts]
+- Invariants 25/33/37: [consistent/contradicts]
+
+### New Issues (if any)
+- **BLOCKER**: [if any]
+- **HIGH**: [if any]
+
+### Summary
+[APPROVED / NOT APPROVED]
+```

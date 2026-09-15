@@ -10,6 +10,8 @@ namespace AbsoluteZero.Core.Item.Data
         public float BlockAmount;
         public DamageFilter Filter;
 
+        public override TargetMode GetTargetMode() => TargetMode.Self;
+
         public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
             Debug.Log($"[COMBAT] DefenseItem '{ItemName}': P{ctx.UserIndex} activated defense — filter={Filter}, block={BlockAmount}");

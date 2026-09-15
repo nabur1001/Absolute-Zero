@@ -4445,6 +4445,77 @@ Transform:
   - {fileID: 263106791}
   m_Father: {fileID: 64526431}
   m_LocalEulerAnglesHint: {x: 60, y: 0, z: 0}
+--- !u!1 &940246347
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 940246349}
+  - component: {fileID: 940246348}
+  - component: {fileID: 940246350}
+  m_Layer: 0
+  m_Name: MatchNetworkState
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &940246348
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 940246347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
+  GlobalObjectIdHash: 1080708315
+  InScenePlacedSourceGlobalObjectIdHash: 0
+  DeferredDespawnTick: 0
+  Ownership: 1
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 0
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1
+  SyncOwnerTransformWhenParented: 1
+  AllowOwnerToParent: 0
+--- !u!4 &940246349
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 940246347}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &940246350
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 940246347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a348b02ad49648541b608d509766193f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: AbsoluteZero.Core::AbsoluteZero.Core.Match.MatchNetworkState
+  ShowTopMostFoldoutHeaderGroup: 1
 --- !u!1 &966241626
 GameObject:
   m_ObjectHideFlags: 0
@@ -5940,6 +6011,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8b1d4f87268ebb642b9279e1d306c5b9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AbsoluteZero.Core.Match.MatchCompositionRoot
+  gameModeRules:
+  - {fileID: 11400000, guid: 8602bccd1e23a0040997892bfa7a3daf, type: 2}
 --- !u!4 &1244861333
 Transform:
   m_ObjectHideFlags: 0
@@ -9292,3 +9365,4 @@ SceneRoots:
   - {fileID: 1402270766}
   - {fileID: 1535517322}
   - {fileID: 1244861333}
+  - {fileID: 940246349}

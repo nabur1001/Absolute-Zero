@@ -1,5 +1,6 @@
 using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Player;
+using AbsoluteZero.Core.Turn;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -64,9 +65,12 @@ namespace AbsoluteZero.Core.Game
         {
             var itemManager = ItemManager.Instance;
             if (itemManager == null) return;
+            var dropTable = TurnManager.Instance != null
+                ? TurnManager.Instance.GetDropTable()
+                : itemManager.GetDropTable();
 
             foreach (var inv in FindObjectsByType<PlayerInventory>(FindObjectsSortMode.None))
-                inv.GrantRandomItems(1, itemManager.GetDropTable());
+                inv.GrantRandomItems(1, dropTable);
             Debug.Log("[DebugItemGranter] 랜덤 아이템 +1 (양쪽)");
         }
 #endif

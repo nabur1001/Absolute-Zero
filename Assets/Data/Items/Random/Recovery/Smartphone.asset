@@ -19,7 +19,7 @@ MonoBehaviour:
   Persistence: 2
   SlotType: 1
   MaxUses: 3
-  DropWeight: 6
+  DropWeight: 5
   IsFreeAction: 0
   AnimTrigger: use
   OpponentAnimTrigger: heal
@@ -32,6 +32,6 @@ MonoBehaviour:
   MiniGameTimeLimit: 5
   MiniGameGoal: 1
   HealPerUse:
-  - 3
-  - 5
+  - 4
+  - 6
   - 7

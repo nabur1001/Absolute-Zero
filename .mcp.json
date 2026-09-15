@@ -11,7 +11,7 @@
     },
     "codex": {
       "type": "stdio",
-      "command": "C:\\Users\\paek6\\AppData\\Local\\OpenAI\\Codex\\bin\\d0097be4feba73d0\\codex.exe",
+      "command": "C:\\Users\\paek6\\AppData\\Local\\OpenAI\\Codex\\bin\\27d6a192e9c98618\\codex.exe",
       "args": [
         "mcp-server"
       ]

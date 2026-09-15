@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using AbsoluteZero.Core.Audio;
 using AbsoluteZero.Core.Combat;
 using AbsoluteZero.Core.Common;
+using AbsoluteZero.Core.Cosmetic;
+using AbsoluteZero.Core.Match;
+using AbsoluteZero.Core.Network;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -33,6 +36,13 @@ namespace AbsoluteZero.Core.Player
         Coroutine _deathCoroutine;
         Coroutine _bindCoroutine;
         bool _isDead;
+        bool _deathPresentationCompleted;
+        bool _pendingGhostTransition;
+        bool _isGhost;
+        float _ghostAlpha = 1f;
+        public bool IsDead => _isDead;
+        public bool IsGhost => _isGhost;
+        public bool IsGhostTransitionPending => _pendingGhostTransition;
         Vector3 _deathSavedPos;
 
         SpriteRenderer _freezeRenderer;
@@ -46,6 +56,9 @@ namespace AbsoluteZero.Core.Player
 
         ParticleSystem _iceBreakParticle;
         ParticleSystem _finalBreakParticle;
+
+        CosmeticVisualController _cosmeticController;
+        string _pendingCosmeticDto;
 
         readonly WaitForSeconds _waitFlashEnd = new(0.5f);
         readonly WaitForSeconds _waitAnimEnd = new(0.6f);
@@ -69,28 +82,144 @@ namespace AbsoluteZero.Core.Player
             }
 
             Debug.Log($"[PlayerVisual] OnNetworkSpawn IsRemote — setting up EnemyPlayer visuals");
-            if (!TryBindEnemyVisual())
-                _bindCoroutine = StartCoroutine(RetryBindEnemyVisual());
+            _playerState.CurrentLifeState.OnValueChanged += OnLifeStateChanged;
+            _bindCoroutine = StartCoroutine(DeferredBindRoutine());
         }
 
-        bool TryBindEnemyVisual()
+        public override void OnNetworkDespawn()
         {
-            var enemyGO = GameObject.Find("EnemyPlayer");
+            if (_bindCoroutine != null) StopCoroutine(_bindCoroutine);
+            _bindCoroutine = null;
+            if (_playerState != null)
+                _playerState.CurrentLifeState.OnValueChanged -= OnLifeStateChanged;
+            ClearSeatMarker();
+            base.OnNetworkDespawn();
+        }
+
+        void OnLifeStateChanged(LifeState prev, LifeState curr)
+        {
+            if (prev != LifeState.Ghost && curr == LifeState.Ghost
+                && !_deathPresentationCompleted && _deathCoroutine == null)
+            {
+                _isDead = true;
+                _pendingGhostTransition = true;
+                return;
+            }
+            SyncGhostFromLifeState();
+        }
+
+        IEnumerator DeferredBindRoutine()
+        {
+            float identityDeadline = Time.realtimeSinceStartup + MatchCompositionRoot.InitializationTimeout;
+            while (ComputeVisualSlot() < 0)
+            {
+                if (!IsSpawned || MatchCompositionRoot.Instance == null) yield break;
+                if (MatchCompositionRoot.Instance.InitializationFailure != null) yield break;
+                if (Time.realtimeSinceStartup >= identityDeadline)
+                {
+                    Debug.LogError("[PlayerVisual] Seat identity was not assigned before the initialization deadline");
+                    yield break;
+                }
+                yield return null;
+            }
+            float elapsed = 0f;
+            const float timeout = 5f;
+
+            while (elapsed < timeout)
+            {
+                int visualSlot = ComputeVisualSlot();
+                if (visualSlot >= 0)
+                {
+                    string slotName = ResolveSlotName(visualSlot);
+                    if (TryBindToSlot(slotName))
+                    {
+                        Debug.Log($"[PlayerVisual] Bound to {slotName} (slot={visualSlot}, seat={_playerState.PlayerIndex})");
+                        SyncGhostFromLifeState(initialSnapshot: true);
+                        _bindCoroutine = null;
+                        yield break;
+                    }
+                }
+
+                yield return null;
+                elapsed += Time.unscaledDeltaTime;
+            }
+
+            Debug.LogError($"[PlayerVisual] Visual binding failed after {timeout}s — seat={_playerState?.PlayerIndex ?? -1}");
+            _bindCoroutine = null;
+        }
+
+        int ComputeVisualSlot()
+        {
+            if (_playerState == null || _playerState.PlayerIndex < 0) return -1;
+
+            int mySeat = _playerState.PlayerIndex;
+            int localSeat = GetLocalPlayerSeat();
+            if (localSeat < 0) return -1;
+
+            return GetRemoteVisualSlot(mySeat, localSeat);
+        }
+
+        // Stable seats retain their visual slot even while other seats spawn/despawn.
+        public static int GetRemoteVisualSlot(int seat, int localSeat)
+        {
+            if (seat < 0 || seat >= 4 || localSeat < 0 || localSeat >= 4 || seat == localSeat)
+                return -1;
+            return seat < localSeat ? seat : seat - 1;
+        }
+
+        GameObject FindSceneVisual(string slotName)
+        {
+            foreach (var root in gameObject.scene.GetRootGameObjects())
+                foreach (var candidate in root.GetComponentsInChildren<Transform>(true))
+                    if (candidate.name == slotName) return candidate.gameObject;
+            return null;
+        }
+
+        int GetLocalPlayerSeat()
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm == null) return -1;
+
+            var allStates = FindObjectsByType<PlayerState>(FindObjectsSortMode.None);
+            foreach (var ps in allStates)
+            {
+                if (ps.NetworkObject != null && ps.NetworkObject.OwnerClientId == nm.LocalClientId)
+                    return ps.PlayerIndex;
+            }
+            return -1;
+        }
+
+        string ResolveSlotName(int visualSlot)
+        {
+            string indexed = $"EnemyPlayer_{visualSlot}";
+            if (FindSceneVisual(indexed) != null) return indexed;
+            if (visualSlot == 0 && FindSceneVisual("EnemyPlayer") != null)
+                return "EnemyPlayer";
+            return indexed;
+        }
+
+        bool TryBindToSlot(string slotName)
+        {
+            var enemyGO = FindSceneVisual(slotName);
             if (enemyGO == null) return false;
+            var claimed = enemyGO.GetComponent<PlayerSeatMarker>();
+            if (claimed != null && claimed.Player != null && claimed.Player != _playerState)
+                return false;
+            enemyGO.SetActive(true);
 
             _visualRoot = enemyGO.transform;
             _animator = enemyGO.GetComponent<Animator>();
             if (_animator == null)
                 _animator = enemyGO.GetComponentInChildren<Animator>();
 
-            Debug.Log($"[PlayerVisual] EnemyPlayer bound: animator={(_animator != null)}, controller={(_animator?.runtimeAnimatorController != null ? _animator.runtimeAnimatorController.name : "NONE")}");
+            Debug.Log($"[PlayerVisual] {slotName} bound: animator={(_animator != null)}, controller={(_animator?.runtimeAnimatorController != null ? _animator.runtimeAnimatorController.name : "NONE")}");
 
             _spriteRenderers = enemyGO.GetComponentsInChildren<SpriteRenderer>(true);
             _cachedMaterials = new Material[_spriteRenderers.Length];
             for (int i = 0; i < _spriteRenderers.Length; i++)
                 _cachedMaterials[i] = _spriteRenderers[i].material;
 
-            Debug.Log($"[PlayerVisual] EnemyPlayer: {_spriteRenderers.Length} sprite renderers found");
+            Debug.Log($"[PlayerVisual] {slotName}: {_spriteRenderers.Length} sprite renderers found");
 
             var fanChild = _visualRoot.Find("fan") ?? _visualRoot.Find("Fan");
             if (fanChild != null)
@@ -114,25 +243,51 @@ namespace AbsoluteZero.Core.Player
                 _finalBreakParticle = finalBreakT.GetComponent<ParticleSystem>();
 
             Debug.Log($"[PlayerVisual] Particles: iceBreak={(_iceBreakParticle != null)}, finalBreak={(_finalBreakParticle != null)}");
+
+            InitCosmeticController(_visualRoot);
+
+            if (!string.IsNullOrEmpty(_pendingCosmeticDto))
+            {
+                ApplyRemoteCosmetic(_pendingCosmeticDto);
+                _pendingCosmeticDto = null;
+            }
+
+            SetupSeatMarker(enemyGO);
+
             return true;
         }
 
-        IEnumerator RetryBindEnemyVisual()
+        void SetupSeatMarker(GameObject visualGO)
         {
-            float elapsed = 0f;
-            const float timeout = 3f;
-            while (elapsed < timeout)
+            var marker = visualGO.GetComponent<PlayerSeatMarker>();
+            if (marker == null)
+                marker = visualGO.AddComponent<PlayerSeatMarker>();
+            marker.SeatIndex = (byte)_playerState.PlayerIndex;
+            marker.Player = _playerState;
+
+            var col = visualGO.GetComponent<BoxCollider>();
+            if (col == null)
             {
-                yield return null;
-                elapsed += Time.unscaledDeltaTime;
-                if (TryBindEnemyVisual())
-                {
-                    _bindCoroutine = null;
-                    yield break;
-                }
+                col = visualGO.AddComponent<BoxCollider>();
+                col.size = new Vector3(1.5f, 2f, 0.5f);
+                col.center = new Vector3(0f, 1f, 0f);
             }
-            Debug.LogError($"[PlayerVisual] EnemyPlayer NOT FOUND after {timeout}s — visual binding failed");
-            _bindCoroutine = null;
+            col.enabled = true;
+        }
+
+        void ClearSeatMarker()
+        {
+            if (_visualRoot == null) return;
+            var marker = _visualRoot.GetComponent<PlayerSeatMarker>();
+            if (marker != null && marker.Player != _playerState) return;
+            if (marker != null)
+            {
+                marker.Player = null;
+                marker.SeatIndex = byte.MaxValue;
+            }
+            var col = _visualRoot.GetComponent<BoxCollider>();
+            if (col != null)
+                col.enabled = false;
         }
 
         void BuildFreezeObject(Transform visual)
@@ -193,17 +348,17 @@ namespace AbsoluteZero.Core.Player
                 _animator.SetBool(IsWindHash, active);
         }
 
-        public void PlayDamageFlash()
+        public void PlayDamageFlash(bool preserveCombatAnimation = false)
         {
             Debug.Log("[PlayerVisual] PlayDamageFlash");
             if (_flashCoroutine != null)
                 StopCoroutine(_flashCoroutine);
-            _flashCoroutine = StartCoroutine(DamageFlashRoutine());
+            _flashCoroutine = StartCoroutine(DamageFlashRoutine(preserveCombatAnimation));
         }
 
-        IEnumerator DamageFlashRoutine()
+        IEnumerator DamageFlashRoutine(bool preserveCombatAnimation)
         {
-            if (_animator != null)
+            if (_animator != null && !preserveCombatAnimation)
                 _animator.SetTrigger("damage");
 
             float duration = 0.15f;
@@ -220,7 +375,7 @@ namespace AbsoluteZero.Core.Player
             SetFlashAmount(0f);
             yield return _waitFlashEnd;
 
-            if (_animator != null)
+            if (_animator != null && !preserveCombatAnimation)
                 _animator.SetTrigger("end");
 
             _flashCoroutine = null;
@@ -243,6 +398,7 @@ namespace AbsoluteZero.Core.Player
             float temp = _playerState.Temperature.Value;
             float normalized = Mathf.Clamp01(temp / 37f);
             Color tint = Color.Lerp(new Color(0.7f, 0.85f, 1f), Color.white, normalized);
+            tint.a = _ghostAlpha;
 
             for (int i = 0; i < _spriteRenderers.Length; i++)
             {
@@ -251,7 +407,7 @@ namespace AbsoluteZero.Core.Player
             }
 
             if (_fanRenderer != null && _playerState.IsFanUpgraded.Value)
-                _fanRenderer.color = new Color(0.4f, 0.6f, 1f);
+                _fanRenderer.color = new Color(0.4f, 0.6f, 1f, _ghostAlpha);
 
             if (_animator != null)
             {
@@ -268,7 +424,7 @@ namespace AbsoluteZero.Core.Player
 
         public void PlayDeathSequence(bool endsMatch = false)
         {
-            if (_isDead) return;
+            if (_deathCoroutine != null || _deathPresentationCompleted) return;
             Debug.Log($"[PlayerVisual] PlayDeathSequence START (endsMatch={endsMatch})");
             _endsMatch = endsMatch;
             _deathSavedPos = _visualRoot != null ? _visualRoot.position : transform.position;
@@ -303,6 +459,26 @@ namespace AbsoluteZero.Core.Player
             return _deathCoroutine;
         }
 
+        public void SettleDeathPresentation()
+        {
+            if (_deathCoroutine != null)
+            {
+                StopCoroutine(_deathCoroutine);
+                _deathCoroutine = null;
+            }
+            if (_freezeRenderer != null)
+                _freezeRenderer.gameObject.SetActive(false);
+            StopBreakParticles();
+
+            if (_playerState != null
+                && _playerState.CurrentLifeState.Value == LifeState.Ghost)
+            {
+                _isDead = true;
+                ApplyGhostAppearanceAfterDeath();
+            }
+            _deathPresentationCompleted = true;
+        }
+
         IEnumerator DeathRoutine()
         {
             yield return null;
@@ -333,6 +509,8 @@ namespace AbsoluteZero.Core.Player
             if (_endsMatch)
             {
                 yield return _waitFreezeHold;
+                ApplyGhostAppearanceAfterDeath();
+                _deathPresentationCompleted = true;
                 _deathCoroutine = null;
                 yield break;
             }
@@ -340,9 +518,17 @@ namespace AbsoluteZero.Core.Player
             if (_freezeRenderer != null)
                 _freezeRenderer.gameObject.SetActive(false);
 
+            var mcr = MatchCompositionRoot.Instance;
+            bool isMulti = mcr != null && mcr.ActiveConfig != null
+                           && mcr.ActiveConfig.Mode == GameMode.Multi;
+
+            if (isMulti)
+                ApplyGhostAppearanceAfterDeath();
+
             if (_animator != null)
                 _animator.Play("Idle_Tree", 0, 0f);
 
+            _deathPresentationCompleted = true;
             _deathCoroutine = null;
         }
 
@@ -375,6 +561,49 @@ namespace AbsoluteZero.Core.Player
             }
 
             _isDead = false;
+            _deathPresentationCompleted = false;
+            _pendingGhostTransition = false;
+            _isGhost = false;
+            _ghostAlpha = 1f;
+        }
+
+        void SyncGhostFromLifeState(bool initialSnapshot = false)
+        {
+            if (_playerState == null) return;
+            var mcr = MatchCompositionRoot.Instance;
+            bool isMulti = mcr != null && mcr.ActiveConfig != null
+                           && mcr.ActiveConfig.Mode == GameMode.Multi;
+            if (!isMulti) return;
+
+            bool shouldBeGhost = _playerState.CurrentLifeState.Value == LifeState.Ghost;
+
+            if (shouldBeGhost)
+            {
+                if (_deathCoroutine != null) return;
+                if (!initialSnapshot && !_deathPresentationCompleted)
+                {
+                    _isDead = true;
+                    _pendingGhostTransition = true;
+                    return;
+                }
+                _isDead = true;
+                _isGhost = true;
+                _ghostAlpha = 0.4f;
+                _pendingGhostTransition = false;
+            }
+            else
+            {
+                _pendingGhostTransition = false;
+                _isGhost = false;
+                _ghostAlpha = 1f;
+            }
+        }
+
+        void ApplyGhostAppearanceAfterDeath()
+        {
+            _pendingGhostTransition = false;
+            _isGhost = true;
+            _ghostAlpha = 0.4f;
         }
 
         void PlayBreakParticles(bool heavy = false)
@@ -409,6 +638,13 @@ namespace AbsoluteZero.Core.Player
         {
             if (_itemRenderer == null) return;
             _itemRenderer.sprite = sprite;
+        }
+
+        public void PrepareDefenseSprite(Sprite sprite)
+        {
+            SetItemSprite(sprite);
+            if (_itemTransform != null)
+                _itemTransform.gameObject.SetActive(sprite != null);
         }
 
         public void ClearItemSprite()
@@ -478,5 +714,57 @@ namespace AbsoluteZero.Core.Player
 
         public Vector3 GetVisualPosition() =>
             _visualRoot != null ? _visualRoot.position : transform.position;
+
+        void InitCosmeticController(Transform root)
+        {
+            _cosmeticController = new CosmeticVisualController();
+
+            var head = root.Find("head") ?? root.Find("Head");
+            var body = root.Find("body") ?? root.Find("Body");
+            var lowerBody = root.Find("lowerbody") ?? root.Find("LowerBody");
+
+            if (head != null) _cosmeticController.SetPartRoot(CosmeticPart.Head, head);
+            if (body != null)
+            {
+                _cosmeticController.SetPartRoot(CosmeticPart.Top, body);
+                _cosmeticController.SetPartRoot(CosmeticPart.Back, body);
+            }
+            if (lowerBody != null) _cosmeticController.SetPartRoot(CosmeticPart.Bottom, lowerBody);
+
+            var tail = root.Find("tail") ?? root.Find("Tail");
+            if (tail == null && lowerBody != null)
+            {
+                var tailGO = new GameObject("tail");
+                tailGO.transform.SetParent(lowerBody, false);
+                tailGO.transform.localPosition = new Vector3(-0.3f, -0.1f, 0f);
+                tail = tailGO.transform;
+            }
+            if (tail != null) _cosmeticController.SetPartRoot(CosmeticPart.Tail, tail);
+        }
+
+        public void ApplyRemoteCosmetic(string json)
+        {
+            if (_cosmeticController == null)
+            {
+                _pendingCosmeticDto = json;
+                return;
+            }
+
+            var service = CosmeticProfileService.Instance;
+            if (service != null && service.Registry != null)
+            {
+                _cosmeticController.ApplyFromDto(json, service.Registry);
+                RefreshRendererCache();
+            }
+        }
+
+        void RefreshRendererCache()
+        {
+            if (_visualRoot == null) return;
+            _spriteRenderers = _visualRoot.GetComponentsInChildren<SpriteRenderer>(true);
+            _cachedMaterials = new Material[_spriteRenderers.Length];
+            for (int i = 0; i < _spriteRenderers.Length; i++)
+                _cachedMaterials[i] = _spriteRenderers[i].material;
+        }
     }
 }

@@ -20,6 +20,8 @@ namespace AbsoluteZero.Core.Item
 
     public enum DamageFilter : byte { Temperature, Food, All }
 
+    public enum TargetMode : byte { Self, SingleTarget }
+
     public enum SpecialEffectType : byte { FanSpeedChange, ExtraAction, RevealOpponent }
 
     public enum EnvironmentType : byte

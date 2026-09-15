@@ -1,4 +1,5 @@
 using AbsoluteZero.Core.Item.Data;
+using AbsoluteZero.Core.Match;
 using AbsoluteZero.Core.Player;
 using Unity.Netcode;
 using UnityEngine;
@@ -19,6 +20,7 @@ namespace AbsoluteZero.Core.Item
         [SerializeField] short catItemId = 3;
 
         ItemDropTable _dropTable;
+        ItemDropTable _multiDropTable;
 
         public override void OnNetworkSpawn()
         {
@@ -52,6 +54,41 @@ namespace AbsoluteZero.Core.Item
 
             if (_dropTable != null)
                 inventory.GrantRandomItems(4, _dropTable);
+        }
+
+        public void InitializePlayerInventory(PlayerInventory inventory, IGameModeRule rule)
+        {
+            if (!IsServer || inventory == null || rule == null) return;
+            if (allItems == null || allItems.Length == 0) return;
+
+            inventory.Initialize(allItems);
+            bool basicOk = inventory.InitializeBasicItems(fanItemId, windbreakerItemId, warmTeaId: warmTeaItemId, catId: catItemId,
+                isWindbreakerUnlimited: rule.IsWindbreakerUnlimited);
+            if (!basicOk) return;
+
+            var dropTable = GetRuleAwareDropTable(rule);
+            if (dropTable != null)
+                inventory.GrantRandomItems(rule.InitialRandomItems, dropTable, rule.MaxRandomItems);
+        }
+
+        public void GrantDeathmatchItems(PlayerInventory inventory, IGameModeRule rule)
+        {
+            if (!IsServer || inventory == null || rule == null) return;
+            if (rule.DeathmatchGrantCount <= 0) return;
+
+            var dropTable = GetRuleAwareDropTable(rule);
+            if (dropTable != null)
+                inventory.FillRandomSlotsWithSeparateCopies(rule.MaxRandomItems, dropTable);
+        }
+
+        public ItemDropTable GetRuleAwareDropTable(IGameModeRule rule)
+        {
+            if (rule == null || rule.IsTarotAllowed)
+                return _dropTable;
+            if (allItems == null || allItems.Length == 0)
+                return null;
+            return _multiDropTable ??= new ItemDropTable(allItems, item =>
+                !(item is SpecialItemDataSO sp && sp.SpecialEffect == SpecialEffectType.RevealOpponent));
         }
 
         public void InitializeClientRegistry(PlayerInventory inventory)

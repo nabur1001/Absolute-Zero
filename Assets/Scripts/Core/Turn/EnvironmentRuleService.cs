@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using AbsoluteZero.Core.Combat;
 using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Item.Data;
+using AbsoluteZero.Core.Match;
 using AbsoluteZero.Core.Player;
 using UnityEngine;
 
@@ -60,6 +61,24 @@ namespace AbsoluteZero.Core.Turn
             if (p1Temp < p2Temp) return 0;
             if (p2Temp < p1Temp) return 1;
             return -1;
+        }
+
+        public int DetermineAmbulanceTargetMulti(PlayerState[] players, ISeatStateAccessor roster)
+        {
+            int target = -1;
+            float lowestTemp = float.MaxValue;
+            for (int i = 0; i < players.Length; i++)
+            {
+                if (players[i] == null) continue;
+                if (roster != null && roster.GetLifeState((byte)i) != LifeState.Alive) continue;
+                float temp = players[i].Temperature.Value;
+                if (temp < lowestTemp)
+                {
+                    lowestTemp = temp;
+                    target = i;
+                }
+            }
+            return target;
         }
 
         public void LogActiveEnvironment(EnvironmentType env, int turnNumber)

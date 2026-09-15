@@ -51,6 +51,8 @@ namespace AbsoluteZero.Core.Combat
                 data.Event0ItemId = Events[0].ItemId;
                 data.Event0UserTemp = Events[0].UserResultTemp;
                 data.Event0TargetTemp = Events[0].TargetResultTemp;
+                data.Event0ImpactFlags = Events[0].ImpactFlags;
+                data.Event0DefenseItemId = Events[0].DefenseItemId;
             }
 
             if (Events.Count > 1)
@@ -61,6 +63,8 @@ namespace AbsoluteZero.Core.Combat
                 data.Event1ItemId = Events[1].ItemId;
                 data.Event1UserTemp = Events[1].UserResultTemp;
                 data.Event1TargetTemp = Events[1].TargetResultTemp;
+                data.Event1ImpactFlags = Events[1].ImpactFlags;
+                data.Event1DefenseItemId = Events[1].DefenseItemId;
             }
 
             return data;
@@ -75,6 +79,8 @@ namespace AbsoluteZero.Core.Combat
         public short ItemId;
         public float UserResultTemp;
         public float TargetResultTemp;
+        public byte ImpactFlags;
+        public short DefenseItemId;
     }
 
     public struct CombatResultData : INetworkSerializable
@@ -89,6 +95,8 @@ namespace AbsoluteZero.Core.Combat
         public short Event0ItemId;
         public float Event0UserTemp;
         public float Event0TargetTemp;
+        public byte Event0ImpactFlags;
+        public short Event0DefenseItemId;
 
         public CombatEventType Event1Type;
         public byte Event1Source;
@@ -96,6 +104,8 @@ namespace AbsoluteZero.Core.Combat
         public short Event1ItemId;
         public float Event1UserTemp;
         public float Event1TargetTemp;
+        public byte Event1ImpactFlags;
+        public short Event1DefenseItemId;
 
         public float P1TempAtTurnStart;
         public float P2TempAtTurnStart;
@@ -122,6 +132,8 @@ namespace AbsoluteZero.Core.Combat
             serializer.SerializeValue(ref Event0ItemId);
             serializer.SerializeValue(ref Event0UserTemp);
             serializer.SerializeValue(ref Event0TargetTemp);
+            serializer.SerializeValue(ref Event0ImpactFlags);
+            serializer.SerializeValue(ref Event0DefenseItemId);
 
             serializer.SerializeValue(ref Event1Type);
             serializer.SerializeValue(ref Event1Source);
@@ -129,6 +141,8 @@ namespace AbsoluteZero.Core.Combat
             serializer.SerializeValue(ref Event1ItemId);
             serializer.SerializeValue(ref Event1UserTemp);
             serializer.SerializeValue(ref Event1TargetTemp);
+            serializer.SerializeValue(ref Event1ImpactFlags);
+            serializer.SerializeValue(ref Event1DefenseItemId);
 
             serializer.SerializeValue(ref P1TempAtTurnStart);
             serializer.SerializeValue(ref P2TempAtTurnStart);

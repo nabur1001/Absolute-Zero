@@ -10,9 +10,11 @@ namespace AbsoluteZero.Core.Player
         public NetworkList<ItemSlotNetData> SlotStates;
 
         const int MAX_SLOTS = 12;
+        const int MAX_DUPLICATE_COPIES = 3;
 
         ItemDataSO[] _itemRegistry;
         short[] _basicItemIds;
+        bool _isWindbreakerUnlimited = true;
         bool[] _thresholdGranted = new bool[3];
 
         void Awake()
@@ -49,6 +51,72 @@ namespace AbsoluteZero.Core.Player
             SlotStates.Add(MakeSlot(catId, _itemRegistry[catId]));
         }
 
+        public int GetRandomSlotCount()
+        {
+            int count = 0;
+            for (int i = 0; i < SlotStates.Count; i++)
+            {
+                if (SlotStates[i].IsEmpty) continue;
+                if (IsBasicItem(SlotStates[i].ItemId)) continue;
+                count++;
+            }
+            return count;
+        }
+
+        bool IsBasicItem(short itemId)
+        {
+            if (_basicItemIds == null) return false;
+            for (int i = 0; i < _basicItemIds.Length; i++)
+            {
+                if (_basicItemIds[i] == itemId) return true;
+            }
+            return false;
+        }
+
+        public bool InitializeBasicItems(short fanId, short windbreakerId, short warmTeaId, short catId, bool isWindbreakerUnlimited)
+        {
+            if (!IsServer) return false;
+            if (_itemRegistry == null || _itemRegistry.Length == 0) return false;
+            if (SlotStates.Count > 0) return false;
+
+            var ids = new short[] { fanId, windbreakerId, warmTeaId, catId };
+            for (int i = 0; i < ids.Length; i++)
+            {
+                if (ids[i] < 0 || ids[i] >= _itemRegistry.Length || _itemRegistry[ids[i]] == null)
+                    return false;
+                for (int j = 0; j < i; j++)
+                {
+                    if (ids[j] == ids[i]) return false;
+                }
+            }
+
+            _basicItemIds = ids;
+            _isWindbreakerUnlimited = isWindbreakerUnlimited;
+
+            SlotStates.Add(MakeSlot(fanId, _itemRegistry[fanId]));
+            if (isWindbreakerUnlimited)
+                SlotStates.Add(MakeSlot(windbreakerId, _itemRegistry[windbreakerId]));
+            else
+                SlotStates.Add(MakeSlotLimited(windbreakerId, _itemRegistry[windbreakerId], 1));
+            SlotStates.Add(MakeSlot(warmTeaId, _itemRegistry[warmTeaId]));
+            SlotStates.Add(MakeSlot(catId, _itemRegistry[catId]));
+            return true;
+        }
+
+        public void GrantRandomItems(int count, ItemDropTable dropTable, int maxRandomItems)
+        {
+            if (!IsServer) return;
+            if (count <= 0 || maxRandomItems <= 0) return;
+            if (dropTable == null || dropTable.IsEmpty) return;
+
+            int currentRandom = GetRandomSlotCount();
+            int allowed = Mathf.Max(0, maxRandomItems - currentRandom);
+            int toGrant = Mathf.Min(count, allowed);
+            if (toGrant <= 0) return;
+
+            GrantRandomItems(toGrant, dropTable);
+        }
+
         public void ConsumeItem(byte slotIndex)
         {
             if (!IsServer) return;
@@ -82,8 +150,45 @@ namespace AbsoluteZero.Core.Player
             for (int i = SlotStates.Count - 1; i >= 0; i--)
             {
                 if (SlotStates[i].IsEmpty)
+                {
+                    GetComponent<PlayerState>()?.GetActionQueue()?.OnSlotRemoved((byte)i);
                     SlotStates.RemoveAt(i);
+                }
             }
+        }
+
+        public int FillRandomSlotsWithSeparateCopies(int maxRandomItems, ItemDropTable dropTable)
+        {
+            if (!IsServer || maxRandomItems <= 0 || dropTable == null || dropTable.IsEmpty)
+                return 0;
+
+            int granted = 0;
+            while (GetRandomSlotCount() < maxRandomItems)
+            {
+                int emptySlot = FindEmptySlot();
+                if (emptySlot < 0 && SlotStates.Count >= MAX_SLOTS) break;
+
+                var item = dropTable.Roll(candidate =>
+                {
+                    short candidateId = FindItemId(candidate);
+                    return candidateId >= 0
+                        && !IsBasicItem(candidateId)
+                        && CountCopies(candidateId) < MAX_DUPLICATE_COPIES;
+                });
+                if (item == null) break;
+
+                short itemId = FindItemId(item);
+                var slot = MakeSlot(itemId, item);
+                if (emptySlot >= 0)
+                    SlotStates[emptySlot] = slot;
+                else
+                    SlotStates.Add(slot);
+                granted++;
+            }
+
+            if (GetRandomSlotCount() < maxRandomItems)
+                Debug.LogWarning($"[ITEM] Random top-up stopped at {GetRandomSlotCount()}/{maxRandomItems}: no legal slot or copy remains");
+            return granted;
         }
 
         public void GrantRandomItems(int count, ItemDropTable dropTable)
@@ -195,6 +300,7 @@ namespace AbsoluteZero.Core.Player
                 short itemId = FindItemId(newItem);
                 if (itemId < 0) continue;
 
+                GetComponent<PlayerState>()?.GetActionQueue()?.InvalidateSlot((byte)i);
                 SlotStates[i] = MakeSlot(itemId, newItem);
                 Debug.Log($"[ITEM] RerollAllRandom: slot={i} '{oldName}' → '{newItem.ItemName}' (id={itemId})");
             }
@@ -240,6 +346,7 @@ namespace AbsoluteZero.Core.Player
                 Debug.Log($"[ITEM] StealRandomItem: stole '{stolenName}' from opponent slot={targetSlot} → my slot={SlotStates.Count - 1}");
             }
 
+            otherInventory.GetComponent<PlayerState>()?.GetActionQueue()?.InvalidateSlot((byte)targetSlot);
             otherInventory.SlotStates[targetSlot] = ItemSlotNetData.Empty;
         }
 
@@ -265,13 +372,16 @@ namespace AbsoluteZero.Core.Player
                     if (existing >= 0)
                     {
                         var slot = SlotStates[existing];
-                        byte uses = basicItem.MaxUses <= 0 ? (byte)255 : (byte)Mathf.Min(basicItem.MaxUses, 254);
+                        byte uses = GetBasicItemUses(basicId, basicItem);
                         slot.RemainingUses = uses;
                         SlotStates[existing] = slot;
                     }
                     else
                     {
-                        SlotStates.Add(MakeSlot(basicId, basicItem));
+                        if (!_isWindbreakerUnlimited && _basicItemIds.Length > 1 && basicId == _basicItemIds[1])
+                            SlotStates.Add(MakeSlotLimited(basicId, basicItem, 1));
+                        else
+                            SlotStates.Add(MakeSlot(basicId, basicItem));
                     }
                 }
             }
@@ -292,9 +402,44 @@ namespace AbsoluteZero.Core.Player
             return -1;
         }
 
+        int FindEmptySlot()
+        {
+            for (int i = 0; i < SlotStates.Count; i++)
+                if (SlotStates[i].IsEmpty)
+                    return i;
+            return -1;
+        }
+
+        int CountCopies(short itemId)
+        {
+            int count = 0;
+            for (int i = 0; i < SlotStates.Count; i++)
+                if (!SlotStates[i].IsEmpty && SlotStates[i].ItemId == itemId)
+                    count++;
+            return count;
+        }
+
         ItemSlotNetData MakeSlot(short itemId, ItemDataSO item)
         {
             byte uses = item.MaxUses <= 0 ? (byte)255 : (byte)Mathf.Min(item.MaxUses, 254);
+            return new ItemSlotNetData
+            {
+                ItemId = itemId,
+                RemainingUses = uses,
+                Flags = (byte)(item.SlotType == ItemSlotType.Sub ? 0b10 : 0)
+            };
+        }
+
+        byte GetBasicItemUses(short basicId, ItemDataSO basicItem)
+        {
+            if (!_isWindbreakerUnlimited && _basicItemIds != null
+                && _basicItemIds.Length > 1 && basicId == _basicItemIds[1])
+                return 1;
+            return basicItem.MaxUses <= 0 ? (byte)255 : (byte)Mathf.Min(basicItem.MaxUses, 254);
+        }
+
+        ItemSlotNetData MakeSlotLimited(short itemId, ItemDataSO item, byte uses)
+        {
             return new ItemSlotNetData
             {
                 ItemId = itemId,

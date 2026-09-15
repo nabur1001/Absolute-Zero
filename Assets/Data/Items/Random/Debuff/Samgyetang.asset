@@ -19,7 +19,7 @@ MonoBehaviour:
   Persistence: 2
   SlotType: 1
   MaxUses: 1
-  DropWeight: 8
+  DropWeight: 7
   IsFreeAction: 0
   AnimTrigger: feed
   OpponentAnimTrigger: attack

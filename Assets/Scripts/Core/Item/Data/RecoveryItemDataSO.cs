@@ -8,6 +8,8 @@ namespace AbsoluteZero.Core.Item.Data
         [Header("Recovery")]
         public float[] HealPerUse = { 7f };
 
+        public override TargetMode GetTargetMode() => TargetMode.Self;
+
         public override ItemEffectOutcome ComputeEffect(ItemContext ctx)
         {
             int useIndex = MaxUses > 0 ? MaxUses - ctx.UserSlot.RemainingUses : 0;

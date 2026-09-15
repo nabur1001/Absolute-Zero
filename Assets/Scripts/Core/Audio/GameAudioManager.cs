@@ -19,6 +19,16 @@ namespace AbsoluteZero.Core.Audio
         float _hoverCooldown;
         const float HOVER_COOLDOWN_SEC = 0.1f;
 
+        const float BgmBase = 0.35f;
+        const float SfxBase = 0.7f;
+        const float UiBase = 0.5f;
+        const float EnvBase = 0.6f;
+        const float FanBase = 0.15f;
+        const float ClockBase = 0.5f;
+
+        float _bgmMaster = 1f;
+        float _sfxMaster = 1f;
+
         static readonly Dictionary<string, string> TriggerToSfx = new()
         {
             { "swing", "SFX_swing" },
@@ -51,12 +61,50 @@ namespace AbsoluteZero.Core.Audio
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
 
-            _bgmSource = CreateSource("BGM", true, 0.35f);
-            _sfxSource = CreateSource("SFX", false, 0.7f);
-            _uiSource = CreateSource("UI", false, 0.5f);
-            _envSource = CreateSource("ENV", false, 0.6f);
-            _fanLoopSource = CreateSource("FanLoop", true, 0.15f);
-            _clockSource = CreateSource("Clock", true, 0.5f);
+            _bgmSource = CreateSource("BGM", true, BgmBase);
+            _sfxSource = CreateSource("SFX", false, SfxBase);
+            _uiSource = CreateSource("UI", false, UiBase);
+            _envSource = CreateSource("ENV", false, EnvBase);
+            _fanLoopSource = CreateSource("FanLoop", true, FanBase);
+            _clockSource = CreateSource("Clock", true, ClockBase);
+
+            _bgmMaster = PlayerPrefs.GetFloat("bgm_volume", 1f);
+            _sfxMaster = PlayerPrefs.GetFloat("sfx_volume", 1f);
+            ApplyBGMVolume();
+            ApplySFXVolume();
+        }
+
+        public float BGMVolume => _bgmMaster;
+        public float SFXVolume => _sfxMaster;
+
+        public void SetBGMVolume(float master)
+        {
+            _bgmMaster = Mathf.Clamp01(master);
+            PlayerPrefs.SetFloat("bgm_volume", _bgmMaster);
+            PlayerPrefs.Save();
+            ApplyBGMVolume();
+        }
+
+        public void SetSFXVolume(float master)
+        {
+            _sfxMaster = Mathf.Clamp01(master);
+            PlayerPrefs.SetFloat("sfx_volume", _sfxMaster);
+            PlayerPrefs.Save();
+            ApplySFXVolume();
+        }
+
+        void ApplyBGMVolume()
+        {
+            if (_bgmSource != null) _bgmSource.volume = BgmBase * _bgmMaster;
+        }
+
+        void ApplySFXVolume()
+        {
+            if (_sfxSource != null) _sfxSource.volume = SfxBase * _sfxMaster;
+            if (_uiSource != null) _uiSource.volume = UiBase * _sfxMaster;
+            if (_envSource != null) _envSource.volume = EnvBase * _sfxMaster;
+            if (_fanLoopSource != null) _fanLoopSource.volume = FanBase * _sfxMaster;
+            if (_clockSource != null) _clockSource.volume = ClockBase * _sfxMaster;
         }
 
         void OnDestroy()

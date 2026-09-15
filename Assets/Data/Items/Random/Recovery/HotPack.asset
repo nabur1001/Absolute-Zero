@@ -32,4 +32,4 @@ MonoBehaviour:
   MiniGameTimeLimit: 7
   MiniGameGoal: 15
   HealPerUse:
-  - 10
+  - 12

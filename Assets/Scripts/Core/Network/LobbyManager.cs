@@ -375,6 +375,25 @@ namespace AbsoluteZero.Core.Network
             }, "Set player name", FireError);
         }
 
+        public async Task SetPlayerCosmeticDataAsync(string dto)
+        {
+            if (currentLobby == null) return;
+
+            await LobbyServiceHelper.ExecuteAsync(async () =>
+            {
+                var options = new UpdatePlayerOptions
+                {
+                    Data = new Dictionary<string, PlayerDataObject>
+                    {
+                        { "CosmeticData", new PlayerDataObject(PlayerDataObject.VisibilityOptions.Member, dto ?? "") }
+                    }
+                };
+
+                currentLobby = await LobbyService.Instance.UpdatePlayerAsync(currentLobby.Id, PlayerId, options);
+                Debug.Log("[LobbyManager] Player cosmetic data updated");
+            }, "Set player cosmetic data", FireError);
+        }
+
         #endregion
 
         #region Relay Integration

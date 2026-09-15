@@ -47,6 +47,9 @@ namespace AbsoluteZero.Core.Session
             if (transport == null)
                 return Result<Unit>.Failure(OperationErrorCode.NetworkStartFailed, "UnityTransport not found");
 
+            // The host requires approval data in the NGO connection handshake.
+            // This must match before StartClient serializes its request.
+            nm.NetworkConfig.ConnectionApproval = true;
             transport.SetRelayServerData(relayData);
 
             if (!nm.StartClient())

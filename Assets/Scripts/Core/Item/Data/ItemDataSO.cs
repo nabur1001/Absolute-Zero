@@ -47,6 +47,8 @@ namespace AbsoluteZero.Core.Item.Data
             ItemEffectApplicator.Apply(ctx, outcome);
         }
 
+        public virtual TargetMode GetTargetMode() => TargetMode.SingleTarget;
+
         public virtual ItemEffectOutcome ComputeEffect(ItemContext ctx) => default;
 
         public virtual bool CanUse(ItemContext ctx)

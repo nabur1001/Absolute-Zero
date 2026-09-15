@@ -20,7 +20,7 @@ namespace AbsoluteZero.Core.Item.Data
                 (defense.Value.Filter == AttackFilter || defense.Value.Filter == DamageFilter.All))
             {
                 Debug.Log($"[COMBAT] DebuffItem '{ItemName}': FULLY BLOCKED by defense (defFilter={defense.Value.Filter})");
-                return new ItemEffectOutcome { Blocked = true };
+                return new ItemEffectOutcome { Blocked = true, TargetDefenseCheck = defense };
             }
 
             var outcome = new ItemEffectOutcome();

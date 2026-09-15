@@ -7,7 +7,9 @@ namespace AbsoluteZero.Core.Network
         WaitingToStart = 0,
         RoundInProgress,
         RoundEnd,
-        MatchComplete
+        MatchComplete,
+        RematchVote,
+        RematchDeclined
     }
 
     public enum MatchEndReason : byte
@@ -21,7 +23,9 @@ namespace AbsoluteZero.Core.Network
     public enum GameMode : byte
     {
         None = 0,
-        TurnBattle
+        OneVsOne = 1,
+        Multi = 2,
+        Solo = 3
     }
 
     public enum TeamId : byte

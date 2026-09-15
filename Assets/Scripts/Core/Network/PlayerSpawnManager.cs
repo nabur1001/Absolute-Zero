@@ -1,11 +1,12 @@
+using AbsoluteZero.Core.Match;
 using Unity.Netcode;
 using UnityEngine;
-using System.Collections.Generic;
 using UnityEngine.SceneManagement;
+using System.Collections.Generic;
 
 namespace AbsoluteZero.Core.Network
 {
-    public class PlayerSpawnManager : MonoBehaviour
+    public class PlayerSpawnManager : MonoBehaviour, IDisconnectHandler
     {
         public static PlayerSpawnManager Instance { get; private set; }
 
@@ -20,15 +21,13 @@ namespace AbsoluteZero.Core.Network
         [SerializeField] private float defaultSpawnRadius = 5f;
         [SerializeField] private float topDownFallbackY = 1f;
 
-        [Header("=== Spawn Timing ===")]
-        [SerializeField] private bool spawnOnlyInGameScene = true;
-        [SerializeField] private string gameSceneName = "GameScene";
-
         private readonly Dictionary<ulong, NetworkObject> spawnedPlayers = new Dictionary<ulong, NetworkObject>();
         private readonly HashSet<ulong> pendingSpawnClients = new HashSet<ulong>();
         private readonly List<Transform> resolvedSpawnPoints = new List<Transform>();
         private bool networkCallbacksSubscribed;
         private bool sceneCallbacksSubscribed;
+        private bool dispatcherRegistered;
+        private bool directDisconnectSubscribed;
 
         private void Awake()
         {
@@ -56,6 +55,9 @@ namespace AbsoluteZero.Core.Network
             if (!networkCallbacksSubscribed || !sceneCallbacksSubscribed)
                 TryRegisterCallbacks();
 
+            if (!dispatcherRegistered)
+                TryRegisterDispatcher();
+
             if (pendingSpawnClients.Count > 0)
                 TrySpawnPendingClients();
         }
@@ -68,7 +70,13 @@ namespace AbsoluteZero.Core.Network
             if (!networkCallbacksSubscribed)
             {
                 networkManager.OnClientConnectedCallback += OnClientConnectedCallback;
-                networkManager.OnClientDisconnectCallback += OnClientDisconnectCallback;
+
+                if (!dispatcherRegistered)
+                {
+                    networkManager.OnClientDisconnectCallback += OnPlayerDisconnected;
+                    directDisconnectSubscribed = true;
+                }
+
                 networkCallbacksSubscribed = true;
             }
 
@@ -98,7 +106,11 @@ namespace AbsoluteZero.Core.Network
             if (networkCallbacksSubscribed)
             {
                 networkManager.OnClientConnectedCallback -= OnClientConnectedCallback;
-                networkManager.OnClientDisconnectCallback -= OnClientDisconnectCallback;
+                if (directDisconnectSubscribed)
+                {
+                    networkManager.OnClientDisconnectCallback -= OnPlayerDisconnected;
+                    directDisconnectSubscribed = false;
+                }
                 networkCallbacksSubscribed = false;
             }
 
@@ -109,10 +121,26 @@ namespace AbsoluteZero.Core.Network
             }
         }
 
-        private bool ShouldSpawnInCurrentScene()
+        private void TryRegisterDispatcher()
         {
-            if (!spawnOnlyInGameScene) return true;
-            return SceneManager.GetActiveScene().name == gameSceneName;
+            if (dispatcherRegistered) return;
+            if (DisconnectDispatcher.Instance == null) return;
+
+            DisconnectDispatcher.Instance.SetDefaultHandler(this);
+            dispatcherRegistered = true;
+
+            if (directDisconnectSubscribed)
+            {
+                var nm = NetworkManager.Singleton;
+                if (nm != null)
+                    nm.OnClientDisconnectCallback -= OnPlayerDisconnected;
+                directDisconnectSubscribed = false;
+            }
+        }
+
+        private bool IsGameplayScene()
+        {
+            return MatchCompositionRoot.Instance != null;
         }
 
         private void QueueExistingClients()
@@ -131,7 +159,13 @@ namespace AbsoluteZero.Core.Network
         {
             var networkManager = NetworkManager.Singleton;
             if (networkManager == null || !networkManager.IsServer) return;
-            if (!ShouldSpawnInCurrentScene()) return;
+            if (!IsGameplayScene()) return;
+
+            var mcr = MatchCompositionRoot.Instance;
+            var roster = mcr?.Roster;
+
+            if (roster != null && !roster.RosterReady)
+                return;
 
             QueueExistingClients();
             if (pendingSpawnClients.Count == 0) return;
@@ -151,7 +185,7 @@ namespace AbsoluteZero.Core.Network
                     continue;
                 }
 
-                SpawnPlayerForClient(clientId);
+                SpawnPlayerForClient(clientId, roster);
                 pendingSpawnClients.Remove(clientId);
             }
         }
@@ -165,7 +199,7 @@ namespace AbsoluteZero.Core.Network
             TrySpawnPendingClients();
         }
 
-        private void OnClientDisconnectCallback(ulong clientId)
+        public void OnPlayerDisconnected(ulong clientId)
         {
             if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer) return;
 
@@ -178,14 +212,13 @@ namespace AbsoluteZero.Core.Network
         {
             var networkManager = NetworkManager.Singleton;
             if (networkManager == null || !networkManager.IsServer) return;
-            if (spawnOnlyInGameScene && sceneName != gameSceneName) return;
             if (clientId != networkManager.LocalClientId) return;
 
             RefreshResolvedSpawnPoints();
             TrySpawnPendingClients();
         }
 
-        private void SpawnPlayerForClient(ulong clientId)
+        private void SpawnPlayerForClient(ulong clientId, MatchRoster roster)
         {
             if (!spawnPlayerCharacter) return;
 
@@ -201,10 +234,13 @@ namespace AbsoluteZero.Core.Network
                 return;
             }
 
-            Vector3 spawnPosition = GetSpawnPosition(clientId);
-            Quaternion spawnRotation = Quaternion.identity;
+            byte seat = 0;
+            bool usedSeat = roster != null && roster.TryGetSeatByClientId(clientId, out seat);
+            Vector3 spawnPosition = usedSeat
+                ? GetSpawnPositionBySeat(seat)
+                : GetSpawnPositionLegacy(clientId);
 
-            GameObject playerInstance = Instantiate(playerPrefab, spawnPosition, spawnRotation);
+            GameObject playerInstance = Instantiate(playerPrefab, spawnPosition, Quaternion.identity);
 
             NetworkObject networkObject = playerInstance.GetComponent<NetworkObject>();
             if (networkObject == null)
@@ -217,7 +253,8 @@ namespace AbsoluteZero.Core.Network
             networkObject.SpawnAsPlayerObject(clientId);
             spawnedPlayers[clientId] = networkObject;
 
-            Debug.Log($"[PlayerSpawnManager] Player spawned for client {clientId} at {spawnPosition}");
+            Debug.Log($"[PlayerSpawnManager] Player spawned for client {clientId} at {spawnPosition}" +
+                      (usedSeat ? $" (seat={seat})" : " (legacy)"));
         }
 
         private void DespawnPlayerForClient(ulong clientId)
@@ -235,7 +272,15 @@ namespace AbsoluteZero.Core.Network
             }
         }
 
-        private Vector3 GetSpawnPosition(ulong clientId)
+        public Vector3 GetSpawnPositionBySeat(byte seatIndex)
+        {
+            if (seatIndex < resolvedSpawnPoints.Count && resolvedSpawnPoints[seatIndex] != null)
+                return resolvedSpawnPoints[seatIndex].position;
+
+            return GetFallbackSpawn(seatIndex);
+        }
+
+        private Vector3 GetSpawnPositionLegacy(ulong clientId)
         {
             if (resolvedSpawnPoints.Count > 0)
             {
@@ -253,6 +298,7 @@ namespace AbsoluteZero.Core.Network
 
             return GetFallbackSpawn(clientId);
         }
+
 
         public void RefreshResolvedSpawnPoints()
         {
@@ -317,7 +363,11 @@ namespace AbsoluteZero.Core.Network
 
         public Vector3 GetRespawnPosition(ulong clientId)
         {
-            return GetSpawnPosition(clientId);
+            var mcr = MatchCompositionRoot.Instance;
+            var roster = mcr?.Roster;
+            if (roster != null && roster.TryGetSeatByClientId(clientId, out byte seat))
+                return GetSpawnPositionBySeat(seat);
+            return GetSpawnPositionLegacy(clientId);
         }
     }
 }
