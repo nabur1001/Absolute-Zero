@@ -40,6 +40,9 @@ namespace AbsoluteZero.Core.Player
         bool _pendingGhostTransition;
         bool _isGhost;
         float _ghostAlpha = 1f;
+        GameObject _ghostPlaceholder;
+        SpriteRenderer _ghostPlaceholderRenderer;
+        static Sprite _ghostPlaceholderSprite;
         public bool IsDead => _isDead;
         public bool IsGhost => _isGhost;
         public bool IsGhostTransitionPending => _pendingGhostTransition;
@@ -233,6 +236,7 @@ namespace AbsoluteZero.Core.Player
             }
 
             BuildFreezeObject(_visualRoot);
+            EnsureGhostPlaceholder();
 
             var iceBreakT = _visualRoot.Find("IceBreakEffect");
             if (iceBreakT != null)
@@ -402,7 +406,7 @@ namespace AbsoluteZero.Core.Player
 
             for (int i = 0; i < _spriteRenderers.Length; i++)
             {
-                if (_spriteRenderers[i] != null)
+                if (_spriteRenderers[i] != null && _spriteRenderers[i] != _ghostPlaceholderRenderer)
                     _spriteRenderers[i].color = tint;
             }
 
@@ -450,6 +454,8 @@ namespace AbsoluteZero.Core.Player
             }
 
             _isDead = true;
+            _ghostAlpha = 1f;
+            if (_ghostPlaceholder != null) _ghostPlaceholder.SetActive(false);
             _deathCoroutine = StartCoroutine(DeathRoutine());
         }
 
@@ -565,6 +571,8 @@ namespace AbsoluteZero.Core.Player
             _pendingGhostTransition = false;
             _isGhost = false;
             _ghostAlpha = 1f;
+            SetCharacterRenderersVisible(true);
+            if (_ghostPlaceholder != null) _ghostPlaceholder.SetActive(false);
         }
 
         void SyncGhostFromLifeState(bool initialSnapshot = false)
@@ -588,7 +596,7 @@ namespace AbsoluteZero.Core.Player
                 }
                 _isDead = true;
                 _isGhost = true;
-                _ghostAlpha = 0.4f;
+                ShowGhostPlaceholder();
                 _pendingGhostTransition = false;
             }
             else
@@ -596,6 +604,8 @@ namespace AbsoluteZero.Core.Player
                 _pendingGhostTransition = false;
                 _isGhost = false;
                 _ghostAlpha = 1f;
+                SetCharacterRenderersVisible(true);
+                if (_ghostPlaceholder != null) _ghostPlaceholder.SetActive(false);
             }
         }
 
@@ -603,7 +613,70 @@ namespace AbsoluteZero.Core.Player
         {
             _pendingGhostTransition = false;
             _isGhost = true;
-            _ghostAlpha = 0.4f;
+            ShowGhostPlaceholder();
+        }
+
+        void EnsureGhostPlaceholder()
+        {
+            if (_visualRoot == null || _ghostPlaceholder != null) return;
+            var existing = _visualRoot.Find("GhostPlaceholder");
+            _ghostPlaceholder = existing != null ? existing.gameObject : new GameObject("GhostPlaceholder");
+            if (existing == null)
+                _ghostPlaceholder.transform.SetParent(_visualRoot, false);
+
+            _ghostPlaceholder.transform.localPosition = new Vector3(0f, 0.72f, -0.08f);
+            _ghostPlaceholder.transform.localRotation = Quaternion.identity;
+            _ghostPlaceholder.transform.localScale = new Vector3(1.15f, 1.55f, 1f);
+            _ghostPlaceholderRenderer = _ghostPlaceholder.GetComponent<SpriteRenderer>();
+            if (_ghostPlaceholderRenderer == null)
+                _ghostPlaceholderRenderer = _ghostPlaceholder.AddComponent<SpriteRenderer>();
+            _ghostPlaceholderRenderer.sprite = GetGhostPlaceholderSprite();
+            _ghostPlaceholderRenderer.color = new Color(0.55f, 0.88f, 1f, 0.72f);
+            _ghostPlaceholderRenderer.sortingOrder = 85;
+            _ghostPlaceholder.SetActive(false);
+        }
+
+        void ShowGhostPlaceholder()
+        {
+            EnsureGhostPlaceholder();
+            _ghostAlpha = 0f;
+            SetCharacterRenderersVisible(false);
+            if (_ghostPlaceholder != null)
+            {
+                _ghostPlaceholder.SetActive(true);
+                _ghostPlaceholderRenderer.enabled = true;
+                _ghostPlaceholderRenderer.color = new Color(0.55f, 0.88f, 1f, 0.72f);
+            }
+        }
+
+        void SetCharacterRenderersVisible(bool visible)
+        {
+            if (_spriteRenderers == null) return;
+            foreach (var renderer in _spriteRenderers)
+            {
+                if (renderer == null || renderer == _ghostPlaceholderRenderer
+                    || renderer == _freezeRenderer || renderer == _itemRenderer)
+                    continue;
+                renderer.enabled = visible;
+            }
+        }
+
+        static Sprite GetGhostPlaceholderSprite()
+        {
+            if (_ghostPlaceholderSprite != null) return _ghostPlaceholderSprite;
+            var texture = new Texture2D(8, 8, TextureFormat.RGBA32, false)
+            {
+                name = "GhostPlaceholderTexture",
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            var pixels = new Color32[64];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = Color.white;
+            texture.SetPixels32(pixels);
+            texture.Apply();
+            _ghostPlaceholderSprite = Sprite.Create(texture, new Rect(0, 0, 8, 8), new Vector2(0.5f, 0.5f), 8f);
+            _ghostPlaceholderSprite.name = "GhostPlaceholderSprite";
+            return _ghostPlaceholderSprite;
         }
 
         void PlayBreakParticles(bool heavy = false)

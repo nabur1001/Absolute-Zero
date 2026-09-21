@@ -110,3 +110,7 @@ InitTestScene*.unity*
 Docs/ACTIVE_CONTEXT.md
 Docs/RECENT_CHANGES.md
 .mcp.json
+
+# Python harness bytecode
+__pycache__/
+*.py[cod]

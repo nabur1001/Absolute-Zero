@@ -1,0 +1,144 @@
+{
+  "passed": true,
+  "runner_error": null,
+  "checkpoints_synchronized": true,
+  "capture_complete": true,
+  "metadata": {
+    "run": "9467824de7e943ffab609e5bc61e3fba",
+    "seed": 32032,
+    "turns": 1,
+    "port": 17865,
+    "ghost_showcase": true,
+    "executable": "C:\\Users\\paek6\\AppData\\Local\\Temp\\AZVisual4P_Current\\Player\\AbsoluteZeroVisual4P.exe"
+  },
+  "players": {
+    "host": {
+      "exit_code": 0,
+      "pass": [
+        "local=0 reason=ghost-showcase settled=1 lastChoice=waiting"
+      ],
+      "assignments": [
+        "local=0 profile=Aggressor"
+      ],
+      "plans": [],
+      "checkpoints": [
+        "seq=1 local=0 turn=1 phase=PrepPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:37.00:Alive:ready=False:selected=False;1:0.00:Ghost:ready=False:selected=False;2:37.00:Alive:ready=False:selected=False;3:37.00:Alive:ready=False:selected=False"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 0,
+        "missing_crown_glyph": 0,
+        "loading_overlay_unassigned": 1,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "host.final-ghost-showcase.png",
+        "host.ghost-chill-impact.png",
+        "host.ghost-chill-motion.png",
+        "host.ghost-freeze.png",
+        "host.ghost-frost-impact.png",
+        "host.ghost-frost-motion.png",
+        "host.ghost-placeholder.png",
+        "host.turn-01-settled-seq-1.png"
+      ],
+      "window_placed": true
+    },
+    "client1": {
+      "exit_code": 0,
+      "pass": [
+        "local=1 reason=ghost-showcase settled=1 lastChoice=waiting"
+      ],
+      "assignments": [
+        "local=1 profile=Counter"
+      ],
+      "plans": [],
+      "checkpoints": [
+        "seq=1 local=1 turn=1 phase=PrepPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:37.00:Alive:ready=False:selected=False;1:0.00:Ghost:ready=False:selected=False;2:37.00:Alive:ready=False:selected=False;3:37.00:Alive:ready=False:selected=False"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 0,
+        "missing_crown_glyph": 0,
+        "loading_overlay_unassigned": 1,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "seat1.final-ghost-showcase.png",
+        "seat1.ghost-chill-impact.png",
+        "seat1.ghost-chill-motion.png",
+        "seat1.ghost-freeze.png",
+        "seat1.ghost-frost-impact.png",
+        "seat1.ghost-frost-motion.png",
+        "seat1.ghost-placeholder.png",
+        "seat1.turn-01-settled-seq-1.png"
+      ],
+      "window_placed": true
+    },
+    "client2": {
+      "exit_code": 0,
+      "pass": [
+        "local=2 reason=ghost-showcase settled=1 lastChoice=waiting"
+      ],
+      "assignments": [
+        "local=2 profile=Support"
+      ],
+      "plans": [],
+      "checkpoints": [
+        "seq=1 local=2 turn=1 phase=PrepPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:37.00:Alive:ready=False:selected=False;1:0.00:Ghost:ready=False:selected=False;2:37.00:Alive:ready=False:selected=False;3:37.00:Alive:ready=False:selected=False"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 0,
+        "missing_crown_glyph": 0,
+        "loading_overlay_unassigned": 1,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "seat2.final-ghost-showcase.png",
+        "seat2.ghost-chill-impact.png",
+        "seat2.ghost-chill-motion.png",
+        "seat2.ghost-freeze.png",
+        "seat2.ghost-frost-impact.png",
+        "seat2.ghost-frost-motion.png",
+        "seat2.ghost-placeholder.png",
+        "seat2.turn-01-settled-seq-1.png"
+      ],
+      "window_placed": true
+    },
+    "client3": {
+      "exit_code": 0,
+      "pass": [
+        "local=3 reason=ghost-showcase settled=1 lastChoice=waiting"
+      ],
+      "assignments": [
+        "local=3 profile=Opportunist"
+      ],
+      "plans": [],
+      "checkpoints": [
+        "seq=1 local=3 turn=1 phase=PrepPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:37.00:Alive:ready=False:selected=False;1:0.00:Ghost:ready=False:selected=False;2:37.00:Alive:ready=False:selected=False;3:37.00:Alive:ready=False:selected=False"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 0,
+        "missing_crown_glyph": 0,
+        "loading_overlay_unassigned": 1,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "seat3.final-ghost-showcase.png",
+        "seat3.ghost-chill-impact.png",
+        "seat3.ghost-chill-motion.png",
+        "seat3.ghost-freeze.png",
+        "seat3.ghost-frost-impact.png",
+        "seat3.ghost-frost-motion.png",
+        "seat3.ghost-placeholder.png",
+        "seat3.turn-01-settled-seq-1.png"
+      ],
+      "window_placed": true
+    }
+  }
+}

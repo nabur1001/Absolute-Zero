@@ -1,0 +1,9 @@
+{
+  "run": "32d189a761e5450d9ab85d12155a9280",
+  "seed": 33021,
+  "turns": 1,
+  "port": 17859,
+  "transport": "unity-relay",
+  "ghost_showcase": false,
+  "executable": "C:\\Users\\paek6\\AppData\\Local\\Temp\\AZVisual4P_Relay\\Player\\AbsoluteZeroRelay4P.exe"
+}

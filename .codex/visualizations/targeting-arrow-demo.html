@@ -1,0 +1,228 @@
+<div id="az-targeting-arrow-demo">
+  <div class="viz-row az-arrow-status">
+    <strong id="az-arrow-state">아이템을 클릭하세요</strong>
+    <span class="text-small text-muted">아이템 선택 → 마우스 이동 → 캐릭터 근처에서 자동 고정</span>
+  </div>
+
+  <div class="card az-arrow-stage" id="az-arrow-stage" aria-label="아이템 타깃 화살표 동작 예시">
+    <svg class="az-arrow-layer" id="az-arrow-layer" aria-hidden="true">
+      <defs>
+        <marker id="az-outline-head" markerWidth="5" markerHeight="5" refX="3.7" refY="2.5" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill="var(--foreground)"></path>
+        </marker>
+        <marker id="az-fill-head" markerWidth="5" markerHeight="5" refX="3.7" refY="2.5" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L5,2.5 L0,5 Z" fill="var(--yellow)"></path>
+        </marker>
+      </defs>
+      <path id="az-arrow-outline" class="az-arrow-outline"></path>
+      <path id="az-arrow-fill" class="az-arrow-fill"></path>
+    </svg>
+
+    <div class="az-enemy az-enemy-west" data-enemy="서쪽 캐릭터" aria-label="서쪽 캐릭터">
+      <span class="az-face">◕‿◕</span><span class="text-small">서쪽</span>
+    </div>
+    <div class="az-enemy az-enemy-north" data-enemy="북쪽 캐릭터" aria-label="북쪽 캐릭터">
+      <span class="az-face">◕‿◕</span><span class="text-small">북쪽</span>
+    </div>
+    <div class="az-enemy az-enemy-east" data-enemy="동쪽 캐릭터" aria-label="동쪽 캐릭터">
+      <span class="az-face">◕‿◕</span><span class="text-small">동쪽</span>
+    </div>
+
+    <button type="button" class="btn btn-primary az-item cursor-interaction" id="az-arrow-item" aria-pressed="false">
+      선택 아이템
+    </button>
+  </div>
+</div>
+
+<style>
+  #az-targeting-arrow-demo { width: 100%; }
+  #az-targeting-arrow-demo .az-arrow-status { justify-content: space-between; margin-bottom: 10px; }
+  #az-targeting-arrow-demo .az-arrow-stage {
+    position: relative;
+    height: clamp(330px, 55vw, 500px);
+    overflow: hidden;
+    user-select: none;
+    touch-action: none;
+  }
+  #az-targeting-arrow-demo .az-arrow-stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, transparent 49.7%, color-mix(in srgb, var(--border) 45%, transparent) 50%, transparent 50.3%),
+      linear-gradient(0deg, transparent 49.7%, color-mix(in srgb, var(--border) 45%, transparent) 50%, transparent 50.3%);
+    pointer-events: none;
+  }
+  #az-targeting-arrow-demo .az-arrow-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 3;
+  }
+  #az-targeting-arrow-demo .az-arrow-outline,
+  #az-targeting-arrow-demo .az-arrow-fill {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0;
+  }
+  #az-targeting-arrow-demo .az-arrow-outline {
+    stroke: var(--foreground);
+    stroke-width: 22;
+    marker-end: url(#az-outline-head);
+  }
+  #az-targeting-arrow-demo .az-arrow-fill {
+    stroke: var(--yellow);
+    stroke-width: 14;
+    marker-end: url(#az-fill-head);
+  }
+  #az-targeting-arrow-demo .az-arrow-stage.is-active .az-arrow-outline,
+  #az-targeting-arrow-demo .az-arrow-stage.is-active .az-arrow-fill { opacity: 1; }
+  #az-targeting-arrow-demo .az-enemy {
+    position: absolute;
+    width: 92px;
+    min-height: 92px;
+    transform: translate(-50%, -50%);
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 2px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--muted) 88%, transparent);
+    color: var(--foreground);
+    border: 2px solid var(--border);
+    z-index: 2;
+    transition: transform 120ms ease, background 120ms ease;
+    pointer-events: none;
+  }
+  #az-targeting-arrow-demo .az-enemy.is-snapped {
+    transform: translate(-50%, -50%) scale(1.08);
+    background: color-mix(in srgb, var(--yellow) 24%, var(--muted));
+  }
+  #az-targeting-arrow-demo .az-face { font-size: 28px; line-height: 1; }
+  #az-targeting-arrow-demo .az-enemy-west { left: 20%; top: 34%; }
+  #az-targeting-arrow-demo .az-enemy-north { left: 50%; top: 20%; }
+  #az-targeting-arrow-demo .az-enemy-east { left: 80%; top: 34%; }
+  #az-targeting-arrow-demo .az-item {
+    position: absolute;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 4;
+  }
+  @media (max-width: 520px) {
+    #az-targeting-arrow-demo .az-arrow-status { align-items: flex-start; }
+    #az-targeting-arrow-demo .az-enemy { width: 76px; min-height: 76px; }
+    #az-targeting-arrow-demo .az-enemy-west { left: 17%; }
+    #az-targeting-arrow-demo .az-enemy-east { left: 83%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #az-targeting-arrow-demo .az-enemy { transition: none; }
+  }
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById('az-targeting-arrow-demo');
+  const stage = document.getElementById('az-arrow-stage');
+  const item = document.getElementById('az-arrow-item');
+  const stateLabel = document.getElementById('az-arrow-state');
+  const outline = document.getElementById('az-arrow-outline');
+  const fill = document.getElementById('az-arrow-fill');
+  const enemies = [...root.querySelectorAll('.az-enemy')];
+  let active = false;
+  let pointer = null;
+  let snappedEnemy = null;
+
+  function localCenter(element, stageRect) {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: rect.left - stageRect.left + rect.width / 2,
+      y: rect.top - stageRect.top + rect.height / 2
+    };
+  }
+
+  function nearestEnemy(point, stageRect) {
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const enemy of enemies) {
+      const center = localCenter(enemy, stageRect);
+      const distance = Math.hypot(point.x - center.x, point.y - center.y);
+      const snapRadius = Math.max(72, enemy.getBoundingClientRect().width * 0.85);
+      if (distance < snapRadius && distance < nearestDistance) {
+        nearest = { enemy, center };
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }
+
+  function draw() {
+    if (!active || !pointer) return;
+    const stageRect = stage.getBoundingClientRect();
+    const start = localCenter(item, stageRect);
+    const candidate = nearestEnemy(pointer, stageRect);
+    const end = candidate ? candidate.center : pointer;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.hypot(dx, dy);
+    const side = dx === 0 ? 1 : Math.sign(dx);
+    const frontLocked = candidate?.enemy.classList.contains('az-enemy-north');
+    let path;
+    if (frontLocked) {
+      path = `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} L ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+    } else {
+      const rise = Math.min(280, Math.max(120, distance * 0.68));
+      const c1 = {
+        x: start.x + side * Math.min(24, distance * 0.06),
+        y: start.y - rise
+      };
+      const c2 = {
+        x: end.x - side * Math.min(145, Math.max(58, distance * 0.30)),
+        y: end.y + Math.min(32, distance * 0.08)
+      };
+      path = `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} C ${c1.x.toFixed(1)} ${c1.y.toFixed(1)}, ${c2.x.toFixed(1)} ${c2.y.toFixed(1)}, ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+    }
+    outline.setAttribute('d', path);
+    fill.setAttribute('d', path);
+
+    if (snappedEnemy !== candidate?.enemy) {
+      enemies.forEach(enemy => enemy.classList.toggle('is-snapped', enemy === candidate?.enemy));
+      snappedEnemy = candidate?.enemy ?? null;
+    }
+    stateLabel.textContent = candidate
+      ? `${candidate.enemy.dataset.enemy}에 ${frontLocked ? '직선으로 ' : ''}고정됨`
+      : '화살촉이 마우스를 따라가는 중';
+  }
+
+  item.addEventListener('click', () => {
+    active = !active;
+    item.setAttribute('aria-pressed', String(active));
+    stage.classList.toggle('is-active', active);
+    if (active) {
+      const stageRect = stage.getBoundingClientRect();
+      pointer = { x: stageRect.width / 2, y: stageRect.height * 0.53 };
+      draw();
+    } else {
+      enemies.forEach(enemy => enemy.classList.remove('is-snapped'));
+      snappedEnemy = null;
+      stateLabel.textContent = '아이템을 클릭하세요';
+    }
+  });
+
+  stage.addEventListener('pointermove', event => {
+    if (!active) return;
+    const rect = stage.getBoundingClientRect();
+    pointer = {
+      x: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+      y: Math.max(0, Math.min(rect.height, event.clientY - rect.top))
+    };
+    draw();
+  });
+
+  window.addEventListener('resize', draw);
+})();
+</script>

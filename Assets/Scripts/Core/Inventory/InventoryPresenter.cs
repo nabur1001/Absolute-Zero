@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using AbsoluteZero.Core.Common;
 using AbsoluteZero.Core.Item;
 using AbsoluteZero.Core.Item.Data;
+using AbsoluteZero.Core.Match;
+using AbsoluteZero.Core.Network;
 using AbsoluteZero.Core.Player;
 using AbsoluteZero.Core.Turn;
 using Unity.Netcode;
@@ -75,11 +77,12 @@ namespace AbsoluteZero.Core.Inventory
 
         void Update()
         {
-            if (!_localBound || !_opponentBound)
+            bool multi = IsMultiMode();
+            if (!_localBound || (!multi && !_opponentBound))
                 TryBindPlayers();
 
             // E2: auto-detect opponent disconnect
-            if (_opponentBound && _opponentPlayer == null)
+            if (!multi && _opponentBound && _opponentPlayer == null)
             {
                 DestroyOpponentViews();
                 UnbindOpponent();
@@ -124,7 +127,7 @@ namespace AbsoluteZero.Core.Inventory
                 RebuildLocalViews();
             }
 
-            if (_needsOpponentRebuild && CanRebuild())
+            if (!IsMultiMode() && _needsOpponentRebuild && CanRebuild())
             {
                 _needsOpponentRebuild = false;
                 RebuildOpponentItems();
@@ -140,8 +143,15 @@ namespace AbsoluteZero.Core.Inventory
             if (!_localBound)
                 TryBindLocal();
 
-            if (!_opponentBound && _localBound)
+            if (!IsMultiMode() && !_opponentBound && _localBound)
                 TryBindOpponent();
+        }
+
+        static bool IsMultiMode()
+        {
+            var root = MatchCompositionRoot.Instance;
+            return root != null && root.ActiveConfig != null
+                && root.ActiveConfig.Mode == GameMode.Multi;
         }
 
         void TryBindLocal()
@@ -255,7 +265,7 @@ namespace AbsoluteZero.Core.Inventory
                 _needsLocalRebuild = false;
                 RebuildLocalViews();
             }
-            if (_needsOpponentRebuild)
+            if (!IsMultiMode() && _needsOpponentRebuild)
             {
                 _needsOpponentRebuild = false;
                 RebuildOpponentItems();
@@ -343,6 +353,11 @@ namespace AbsoluteZero.Core.Inventory
 
         void OnHasSelectedItemChanged(bool oldVal, bool newVal)
         {
+            if (!newVal)
+            {
+                _confirmedSlotIndex = -1;
+                _confirmedItemId = -1;
+            }
             UpdateSelectionVisuals();
             OnSelectionChanged?.Invoke();
         }
@@ -641,7 +656,8 @@ namespace AbsoluteZero.Core.Inventory
             if (_localPlayer.IsBasicBlocked.Value && itemData.Persistence == ItemPersistence.Permanent)
                 return false;
 
-            return !_localPlayer.HasSelectedItem.Value;
+            if (!_localPlayer.HasSelectedItem.Value) return true;
+            return slotIndex == _confirmedSlotIndex;
         }
 
         // ─── Confirm Flow (E4: ItemId-based) ────────────────────
@@ -670,6 +686,17 @@ namespace AbsoluteZero.Core.Inventory
                 _confirmedItemId = _localInventory.SlotStates[slotIndex].ItemId;
             _pendingItemId = -1;
             UpdateSelectionVisuals();
+        }
+
+        public void CancelPendingItem()
+        {
+            _pendingItemId = -1;
+        }
+
+        public bool IsConfirmedSlot(int slotIndex)
+        {
+            return _localPlayer != null && _localPlayer.HasSelectedItem.Value
+                && slotIndex == _confirmedSlotIndex;
         }
 
         void ResolveConfirmedSlotByItemId()

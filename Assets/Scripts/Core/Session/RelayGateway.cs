@@ -28,7 +28,7 @@ namespace AbsoluteZero.Core.Session
                 string joinCode = await RelayService.Instance.GetJoinCodeAsync(allocation.AllocationId);
                 var serverData = new RelayServerData(allocation, "dtls");
 
-                Debug.Log($"{LogPrefix} Allocated, JoinCode: {joinCode}");
+                Debug.Log($"{LogPrefix} Allocated");
                 return Result<RelayHostResult>.Success(new RelayHostResult(serverData, joinCode));
             }
             catch (RelayServiceException e)
@@ -45,7 +45,7 @@ namespace AbsoluteZero.Core.Session
                 var joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
                 var serverData = new RelayServerData(joinAllocation, "dtls");
 
-                Debug.Log($"{LogPrefix} Joined relay: {joinCode}");
+                Debug.Log($"{LogPrefix} Joined relay");
                 return Result<RelayJoinResult>.Success(new RelayJoinResult(serverData));
             }
             catch (RelayServiceException e)

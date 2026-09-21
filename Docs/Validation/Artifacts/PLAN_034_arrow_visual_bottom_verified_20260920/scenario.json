@@ -1,0 +1,9 @@
+{
+  "run": "5d165006c5e54dc19a416da256a64b29",
+  "seed": 34021,
+  "turns": 1,
+  "port": 17859,
+  "transport": "local-utp",
+  "ghost_showcase": false,
+  "executable": "C:\\Users\\paek6\\AppData\\Local\\Temp\\AZArrowVisualBottom\\Player\\AbsoluteZeroArrow4P.exe"
+}

@@ -63,6 +63,15 @@ namespace AbsoluteZero.UI.Game.Bridge
             return true;
         }
 
+        public bool TryCancelSelection()
+        {
+            if (_localPlayer == null || _localPlayer.IsReady.Value || !_localPlayer.HasSelectedItem.Value)
+                return false;
+
+            _localPlayer.CancelSelectionServerRpc();
+            return true;
+        }
+
         public void PressReady()
         {
             if (_localPlayer == null)

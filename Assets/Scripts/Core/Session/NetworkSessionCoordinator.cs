@@ -670,6 +670,17 @@ namespace AbsoluteZero.Core.Session
 
         static string DetectParrelSyncProfile()
         {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            var commandLine = Environment.GetCommandLineArgs();
+            int profileIndex = Array.IndexOf(commandLine, "--az-services-profile");
+            if (profileIndex >= 0 && profileIndex + 1 < commandLine.Length &&
+                !string.IsNullOrWhiteSpace(commandLine[profileIndex + 1]))
+            {
+                string commandLineProfile = commandLine[profileIndex + 1].Trim();
+                Debug.Log($"[SessionCoordinator] Services profile override: {commandLineProfile}");
+                return commandLineProfile;
+            }
+#endif
 #if UNITY_EDITOR
             try
             {

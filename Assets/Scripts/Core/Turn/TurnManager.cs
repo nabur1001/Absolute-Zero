@@ -1487,7 +1487,31 @@ namespace AbsoluteZero.Core.Turn
         void GhostSkillUsedClientRpc(byte ghostSeat, byte skillIndex, byte targetSeat)
         {
             Debug.Log($"[Ghost] Skill used: Ghost P{ghostSeat} → P{targetSeat}, skill={skillIndex}");
+            OnGhostSkillUsed?.Invoke(ghostSeat, skillIndex, targetSeat);
         }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        public bool DebugForceGhostForVisual(byte seat)
+        {
+            if (!IsServer || !IsMulti || _deathService == null || _players == null
+                || seat >= _players.Length || _players[seat] == null
+                || _players[seat].CurrentLifeState.Value != LifeState.Alive
+                || _multiPresentationInFlight || (_barrier?.IsActive ?? false))
+                return false;
+
+            _players[seat].Temperature.Value = TemperatureSystem.MIN_TEMP;
+            if (!_deathService.TryKill(seat, DamageSource.None)) return false;
+            _deathService.FlushDeathQueue();
+            byte deathMask = _deathService.ConsumeDeathMask();
+            TryGrantDeathmatchItems();
+            var roundEnd = _deathService.EvaluateRoundEnd();
+            if (roundEnd.IsRoundOver) _ghostRoundEndTriggered = true;
+            _multiPresentationInFlight = true;
+            StartCoroutine(GhostKillDeathPresentation(deathMask, roundEnd));
+            Debug.Log($"[VISUAL] FORCE_GHOST seat={seat} deathMask={deathMask:X2}");
+            return true;
+        }
+#endif
 
         IEnumerator WaitForRematchDecision()
         {
@@ -1746,6 +1770,7 @@ namespace AbsoluteZero.Core.Turn
 
         public static event System.Action<byte, bool, uint> OnMultiDeathPresentation;
         public static event System.Action<Match.MultiMatchOutcome, byte> OnMultiMatchOutcome;
+        public static event System.Action<byte, byte, byte> OnGhostSkillUsed;
 
         [Rpc(SendTo.Everyone)]
         void PresentMultiDeathsRpc(byte deathMask, bool endsRound, uint presentationId)

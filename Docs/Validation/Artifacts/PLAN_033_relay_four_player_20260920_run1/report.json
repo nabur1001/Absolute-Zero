@@ -1,0 +1,145 @@
+{
+  "passed": true,
+  "runner_error": null,
+  "checkpoints_synchronized": true,
+  "capture_complete": true,
+  "metadata": {
+    "run": "32d189a761e5450d9ab85d12155a9280",
+    "seed": 33021,
+    "turns": 1,
+    "port": 17859,
+    "transport": "unity-relay",
+    "ghost_showcase": false,
+    "executable": "C:\\Users\\paek6\\AppData\\Local\\Temp\\AZVisual4P_Relay\\Player\\AbsoluteZeroRelay4P.exe"
+  },
+  "players": {
+    "host": {
+      "exit_code": 0,
+      "pass": [
+        "local=0 reason=turn-limit settled=1 lastChoice=Fan -> 1"
+      ],
+      "assignments": [
+        "local=0 profile=Aggressor"
+      ],
+      "plans": [
+        "turn=1 local=0 profile=Aggressor roll=7 slot=0 item=Fan category=Attack target=1"
+      ],
+      "checkpoints": [
+        "seq=1 local=0 turn=1 phase=AttackPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:36.00:Alive:ready=True:selected=True;1:35.00:Alive:ready=True:selected=True;2:37.00:Alive:ready=True:selected=True;3:34.00:Alive:ready=True:selected=True"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 1,
+        "missing_crown_glyph": 8,
+        "loading_overlay_unassigned": 1,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "host.final-turn-limit.png",
+        "host.turn-01-prep.png",
+        "host.turn-01-settled-seq-1.png",
+        "host.turn-01-target-east-P3.png",
+        "host.turn-01-target-north-P2.png",
+        "host.turn-01-target-west-P1.png"
+      ],
+      "window_placed": true
+    },
+    "client1": {
+      "exit_code": 0,
+      "pass": [
+        "local=2 reason=turn-limit settled=1 lastChoice=Warm Tea -> self"
+      ],
+      "assignments": [
+        "local=2 profile=Support"
+      ],
+      "plans": [
+        "turn=1 local=2 profile=Support roll=64 slot=2 item=Warm Tea category=Recovery target=self"
+      ],
+      "checkpoints": [
+        "seq=1 local=2 turn=1 phase=AttackPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:36.00:Alive:ready=True:selected=True;1:35.00:Alive:ready=True:selected=True;2:37.00:Alive:ready=True:selected=True;3:34.00:Alive:ready=True:selected=True"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 1,
+        "missing_crown_glyph": 6,
+        "loading_overlay_unassigned": 0,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "seat2.final-turn-limit.png",
+        "seat2.turn-01-prep.png",
+        "seat2.turn-01-settled-seq-1.png",
+        "seat2.turn-01-target-east-P3.png",
+        "seat2.turn-01-target-north-P1.png",
+        "seat2.turn-01-target-west-P0.png"
+      ],
+      "window_placed": true
+    },
+    "client2": {
+      "exit_code": 0,
+      "pass": [
+        "local=1 reason=turn-limit settled=1 lastChoice=Windbreaker -> self"
+      ],
+      "assignments": [
+        "local=1 profile=Counter"
+      ],
+      "plans": [
+        "turn=1 local=1 profile=Counter roll=38 slot=1 item=Windbreaker category=Defense target=self"
+      ],
+      "checkpoints": [
+        "seq=1 local=1 turn=1 phase=AttackPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:36.00:Alive:ready=True:selected=True;1:35.00:Alive:ready=True:selected=True;2:37.00:Alive:ready=True:selected=True;3:34.00:Alive:ready=True:selected=True"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 1,
+        "missing_crown_glyph": 5,
+        "loading_overlay_unassigned": 0,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "seat1.final-turn-limit.png",
+        "seat1.turn-01-prep.png",
+        "seat1.turn-01-settled-seq-1.png",
+        "seat1.turn-01-target-east-P3.png",
+        "seat1.turn-01-target-north-P2.png",
+        "seat1.turn-01-target-west-P0.png"
+      ],
+      "window_placed": true
+    },
+    "client3": {
+      "exit_code": 0,
+      "pass": [
+        "local=3 reason=turn-limit settled=1 lastChoice=Cat -> 0"
+      ],
+      "assignments": [
+        "local=3 profile=Opportunist"
+      ],
+      "plans": [
+        "turn=1 local=3 profile=Opportunist roll=43 slot=3 item=Cat category=Sabotage target=0"
+      ],
+      "checkpoints": [
+        "seq=1 local=3 turn=1 phase=AttackPhase settled=1 kills=0,0,0,0 terminal=0/0/False seats=0:36.00:Alive:ready=True:selected=True;1:35.00:Alive:ready=True:selected=True;2:37.00:Alive:ready=True:selected=True;3:34.00:Alive:ready=True:selected=True"
+      ],
+      "errors": [],
+      "findings": {
+        "missing_animator": 1,
+        "missing_crown_glyph": 5,
+        "loading_overlay_unassigned": 0,
+        "duplicate_minigame_result": 0,
+        "presentation_timeout": 0
+      },
+      "screenshots": [
+        "seat3.final-turn-limit.png",
+        "seat3.turn-01-prep.png",
+        "seat3.turn-01-settled-seq-1.png",
+        "seat3.turn-01-target-east-P2.png",
+        "seat3.turn-01-target-north-P1.png",
+        "seat3.turn-01-target-west-P0.png"
+      ],
+      "window_placed": true
+    }
+  }
+}

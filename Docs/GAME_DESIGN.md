@@ -476,9 +476,10 @@ Camera: pos(0,5,-5) rot(22°,0,0) FOV=65 — overhead angle, all 4 seats visible
      SP1(-3,0,0)              SP2(3,0,0)
 ```
 
-- 2×2 grid spawn layout (front-left, front-right, back-left, back-right)
-- 3-player matches use SP1~SP3 (SP4 unused)
-- Each seat has `PlayerSeatMarker` + `BoxCollider(trigger)` for click-to-target raycast
+- Each client presents its own player at the south/local position.
+- The other stable seat identities are projected into west, north, and east visual slots; three-player matches leave one remote slot unused.
+- Presentation-slot rotation never changes the authoritative seat index used by NGO state or action targets.
+- Each remote seat has `PlayerSeatMarker` + `BoxCollider(trigger)` for click-to-target raycast.
 
 ### Balance Differences from 1v1
 
@@ -492,7 +493,7 @@ Camera: pos(0,5,-5) rot(22°,0,0) FOV=65 — overhead angle, all 4 seats visible
 | 10° threshold | +3 items | **+1 item** |
 | Windbreaker | Permanent | **1-use (Consumable)** |
 | Tarot Card | Available | **Removed from drop table** |
-| Icebox position | Left-center | **Center** |
+| Icebox position | Left-center | **South-center, behind the local item row** |
 | Death rule | Round ends | Ghost state, round continues |
 | Deathmatch grant | N/A | **2 players left → keep current items/uses and fill empty random capacity to 4** |
 
@@ -500,8 +501,10 @@ Deathmatch top-up keeps duplicates in separate slots, allows at most three copie
 
 ### Target Selection
 
-- Item use requires **click-to-target** — click on the target character to designate
-- Re-clicking a targeted item cancels the selection
+- Single-target item use is **click item → aim → snap arrow → click character to confirm**.
+- The arrow begins at the selected item, follows the pointer, snaps to a valid character, stays straight for north, and bends strongly toward west/east.
+- Before confirmation, re-click the same item, Escape, or right-click cancels locally.
+- After confirmation and before Ready, re-clicking the confirmed item sends the server-authoritative cancellation request. Ready locks the choice.
 - Self-targeting items (Recovery, Defense, Buff) auto-target self without click
 
 ### Round Flow (Multi)

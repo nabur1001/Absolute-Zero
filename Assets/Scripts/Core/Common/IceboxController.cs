@@ -119,6 +119,26 @@ namespace AbsoluteZero.Core.Common
             if (Instance == this) Instance = null;
         }
 
+        /// <summary>
+        /// Repositions the local presentation anchor and an already spawned box.
+        /// Multi uses this after Start so scene initialization order cannot leave
+        /// the box at the legacy 1v1 location.
+        /// </summary>
+        public bool TrySetPresentationPosition(Vector3 worldPosition)
+        {
+            if (_boxSpawnPoint == null)
+            {
+                var spawnPoint = GameObject.Find("BoxSpawnPoint");
+                if (spawnPoint == null) return false;
+                _boxSpawnPoint = spawnPoint.transform;
+            }
+
+            _boxSpawnPoint.position = worldPosition;
+            if (_iceboxInstance != null)
+                _iceboxInstance.transform.position = worldPosition;
+            return true;
+        }
+
         public void PlayDistribution(Transform[] itemTransforms)
         {
             if (_boxSpawnPoint == null || itemTransforms == null || itemTransforms.Length == 0)
