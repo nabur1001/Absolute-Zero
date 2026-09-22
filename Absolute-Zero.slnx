@@ -1,0 +1,9 @@
+﻿<Solution>
+  <Project Path="AbsoluteZero.UI.csproj" />
+  <Project Path="Unity.Networking.Transport.csproj" />
+  <Project Path="AbsoluteZero.Core.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="Unity.Networking.Editor.csproj" />
+  <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="AbsoluteZero.EditorTests.csproj" />
+</Solution>
